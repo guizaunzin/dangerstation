@@ -599,11 +599,12 @@ button {
   font-size: 0.95rem;
 }
 
-.trend-up {
-  color: #ffd29a;
+/* Cor pelo efeito no módulo: verde quando melhora, âmbar quando piora. */
+.trend-good {
+  color: var(--ok);
 }
-.trend-down {
-  color: #9fd4ff;
+.trend-bad {
+  color: var(--warn);
 }
 .trend-stable {
   color: var(--muted);
@@ -1855,4 +1856,30 @@ button {
   .rescue {
     justify-content: flex-end;
   }
+}
+
+.score-explain {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.report-lines .subtotal {
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.report-lines .total dt,
+.report-lines .total dd {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.sheet-paused {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  color: var(--warn);
+  font-family: var(--mono);
 }

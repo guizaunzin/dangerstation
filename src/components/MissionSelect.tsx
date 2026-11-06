@@ -73,6 +73,10 @@ export function MissionSelect({ records, prefs, onStart, onToggleSound }: Props)
             <IconGrad /> Treinamento
           </h2>
           <p>Sequência fixa de 5 falhas, sempre igual. Ensina o primeiro ajuste e as duas respostas de cada reparo.</p>
+          <p className="muted small">
+            Regras do {DIFFICULTIES[trainingMission().difficulty].label}: pontuação ×
+            {String(DIFFICULTIES[trainingMission().difficulty].scoreMultiplier).replace(".", ",")}.
+          </p>
           <p className="chips">
             {(["generator", "cooling", "leak", "scrubber", "solar"] as FailureId[]).map((id) => (
               <span key={id} className="chip">
@@ -108,7 +112,9 @@ export function MissionSelect({ records, prefs, onStart, onToggleSound }: Props)
               </button>
             ))}
           </div>
-          <p className="muted small">{DIFFICULTIES[difficulty].description}</p>
+          <p className="muted small">
+            {DIFFICULTIES[difficulty].description} Pontuação ×{String(DIFFICULTIES[difficulty].scoreMultiplier).replace(".", ",")}.
+          </p>
           <label className="seed-field">
             <span>Semente (opcional)</span>
             <input

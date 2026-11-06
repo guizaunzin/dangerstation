@@ -297,6 +297,12 @@ export function ReportOverlay({
   if (!report) return null;
   const score = computeScore(state);
   const won = report.result === "won";
+  const diff = DIFFICULTIES[state.mission.difficulty];
+  const fmtMult = (m: number) => String(m).replace(".", ",");
+  const mult = fmtMult(score.multiplier);
+  const multipliers = Object.values(DIFFICULTIES)
+    .map((d) => `${d.label} ×${fmtMult(d.scoreMultiplier)}`)
+    .join(", ");
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="report-title">
       <div className={`modal report ${won ? "is-won" : "is-lost"}`}>
@@ -310,11 +316,9 @@ export function ReportOverlay({
           <div>
             <span className="label">Pontuação</span>
             <strong className="mono">{score.total}</strong>
-            {score.multiplier !== 1 ? (
-              <span className="sub mono">
-                {score.base} × {String(score.multiplier).replace(".", ",")}
-              </span>
-            ) : null}
+            <span className="sub mono">
+              {score.base} pontos-base × {mult} ({diff.label})
+            </span>
           </div>
           <div className="score-medal">
             {score.medal ? <MedalBadge medal={score.medal} /> : <span className="muted">Sem medalha</span>}
@@ -331,7 +335,26 @@ export function ReportOverlay({
               <dd className="mono">{it.points > 0 ? `+${it.points}` : it.points}</dd>
             </div>
           ))}
+          <div className="subtotal">
+            <dt>Pontos-base</dt>
+            <dd className="mono">{score.base}</dd>
+          </div>
+          <div>
+            <dt>
+              Multiplicador da dificuldade {diff.label}
+              {state.mission.kind === "training" ? " (regras do treinamento)" : ""}
+            </dt>
+            <dd className="mono">×{mult}</dd>
+          </div>
+          <div className="total">
+            <dt>Pontuação final</dt>
+            <dd className="mono">{score.total}</dd>
+          </div>
         </dl>
+        <p className="score-explain">
+          Dificuldades mais altas valem mais: {multipliers}. A medalha usa os pontos-base, antes do multiplicador: no {diff.label}, prata a
+          partir de {diff.medals.silver} e ouro a partir de {diff.medals.gold}; sobreviver garante o bronze.
+        </p>
         <h3>Módulo</h3>
         <dl className="report-lines">
           {report.lines.map((l) => (

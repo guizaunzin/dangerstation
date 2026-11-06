@@ -165,13 +165,15 @@ export function RepairsPanel({ state, flows, disabled, onChoose, onAbort }: Prop
 
 interface SheetProps {
   state: SimState;
+  /** Relógio pausado automaticamente enquanto o jogador lê os detalhes. */
+  paused?: boolean;
   failure: FailureId;
   option: RepairOptionId;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export function RepairConfirmSheet({ state, failure, option, onConfirm, onCancel }: SheetProps) {
+export function RepairConfirmSheet({ state, failure, option, paused, onConfirm, onCancel }: SheetProps) {
   const def = failureDef(failure);
   const p = previewRepair(state, failure, option);
   const opt = p.option;
@@ -182,6 +184,11 @@ export function RepairConfirmSheet({ state, failure, option, onConfirm, onCancel
   return (
     <div className="overlay sheet-overlay" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
       <div className="sheet">
+        {paused ? (
+          <p className="sheet-paused">
+            <IconClock /> Relógio pausado enquanto você lê. Ele volta a correr ao confirmar ou voltar.
+          </p>
+        ) : null}
         <p className="sheet-kicker">
           {def.title} · {option === "quick" ? "Resposta rápida" : "Reparo completo"}
         </p>

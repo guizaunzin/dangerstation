@@ -26,14 +26,31 @@ const ALERT_LABEL: Record<AlertLevel, string> = { critical: "CRÍTICO", warning:
 export default function Game() {
   const store = getStore();
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, () => SERVER_SNAPSHOT);
-  const [pending, setPending] = useState<{ failure: FailureId; option: RepairOptionId } | null>(null);
+  const [pending, setPending] = useState<{ failure: FailureId; option: RepairOptionId; resumeAfter: boolean } | null>(null);
+
+  /** Abrir os detalhes de um reparo pausa o relógio; fechar retoma se estava correndo. */
+  const openRepair = (failure: FailureId, option: RepairOptionId) => {
+    const wasRunning = store.getSnapshot().sim?.phase === "active" && !store.getSnapshot().clock.paused;
+    if (wasRunning) store.pause();
+    setPending({ failure, option, resumeAfter: wasRunning });
+  };
+  const closeRepair = (confirm: boolean) => {
+    if (!pending) return;
+    if (confirm) store.startRepair(pending.failure, pending.option);
+    if (pending.resumeAfter) store.resume();
+    setPending(null);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-      if (e.key === "Escape") setPending(null);
-      if ((e.key === " " || e.key.toLowerCase() === "p") && store.getSnapshot().sim?.phase === "active") {
+      if (e.key === "Escape") setPending((p) => {
+        if (p?.resumeAfter) store.resume();
+        return null;
+      });
+      const sheetOpen = !!document.querySelector(".sheet-overlay");
+      if (!sheetOpen && (e.key === " " || e.key.toLowerCase() === "p") && store.getSnapshot().sim?.phase === "active") {
         if (target?.tagName === "BUTTON" && e.key === " ") return; // espaço ativa o botão focado
         e.preventDefault();
         store.togglePause();
@@ -150,7 +167,7 @@ export default function Game() {
           state={sim}
           flows={flows}
           disabled={controlsDisabled}
-          onChoose={(failure, option) => setPending({ failure, option })}
+          onChoose={openRepair}
           onAbort={() => store.abortRepair()}
         />
         <LogPanel log={sim.log} />
@@ -168,11 +185,9 @@ export default function Game() {
           state={sim}
           failure={pending.failure}
           option={pending.option}
-          onCancel={() => setPending(null)}
-          onConfirm={() => {
-            store.startRepair(pending.failure, pending.option);
-            setPending(null);
-          }}
+          paused={pending.resumeAfter}
+          onCancel={() => closeRepair(false)}
+          onConfirm={() => closeRepair(true)}
         />
       ) : null}
       {sim.phase === "intro" ? <IntroOverlay state={sim} onStart={() => store.begin()} onMenu={() => store.toMenu()} /> : null}

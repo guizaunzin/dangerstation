@@ -129,6 +129,28 @@ await scenario(browser, "desktop-treino", desktop, async (page) => {
   check("desktop: dica do primeiro ajuste aparece", await page.getByText("Primeiro ajuste:").isVisible());
   await setAlloc(page, "cooling", 4);
   check("desktop: dica some após o ajuste", !(await page.getByText("Primeiro ajuste:").isVisible()));
+  await setAlloc(page, "life", 6);
+  await page.waitForTimeout(400);
+  // A cor segue o efeito: oxigênio e bateria subindo = bom; calor subindo = ruim.
+  const tones = await page.evaluate(() =>
+    [
+      ["Oxigênio", "up"],
+      ["Calor", "down"],
+      ["Bateria", "up"],
+    ].map(([name, goodWhen]) => {
+      const el = document.querySelector(`[aria-label="${name}"] .trend`);
+      const txt = el.textContent;
+      const dir = /subindo/.test(txt) ? "up" : /caindo/.test(txt) ? "down" : "stable";
+      const expected = dir === "stable" ? "trend-stable" : dir === goodWhen ? "trend-good" : "trend-bad";
+      return { name, dir, ok: el.classList.contains(expected) };
+    }),
+  );
+  check(
+    "desktop: cor da tendência segue o efeito no módulo",
+    tones.every((x) => x.ok) && tones.find((x) => x.name === "Oxigênio").dir === "up",
+    tones.map((x) => `${x.name} ${x.dir}`).join(", "),
+  );
+  await setAlloc(page, "life", 4);
   check("desktop: linha do tempo do resgate visível", await page.getByText("Nave de resgate").isVisible());
 
   await pauseGame(page);
@@ -146,7 +168,16 @@ await scenario(browser, "desktop-treino", desktop, async (page) => {
   await page.screenshot({ path: join(OUT, "desktop-02-falha.png") });
   await page.locator(".failure-card.is-active").first().getByRole("button", { name: /Reparo completo/ }).click();
   check("desktop: confirmação mostra custo e duração", await page.getByText("enquanto a equipe trabalha").isVisible());
+  const tSheet = (await readSave(page)).t;
+  await page.waitForTimeout(700);
+  check("desktop: ler os detalhes do reparo pausa o relógio", (await readSave(page)).t === tSheet);
+  check("desktop: detalhes avisam que o relógio está pausado", await page.getByText("Relógio pausado enquanto você lê").isVisible());
+  await page.getByRole("button", { name: "Voltar" }).click();
+  await page.waitForTimeout(500);
+  check("desktop: voltar dos detalhes retoma o relógio", (await readSave(page)).t > tSheet);
+  await page.locator(".failure-card.is-active").first().getByRole("button", { name: /Reparo completo/ }).click();
   await page.getByRole("button", { name: "Confirmar reparo" }).click();
+  check("desktop: confirmar não deixa o jogo em pausa", await page.getByRole("button", { name: "Pausar missão" }).isVisible());
   await setAlloc(page, "life", 3);
   const before = await readSave(page);
   await page.reload();
@@ -161,6 +192,7 @@ await scenario(browser, "desktop-treino", desktop, async (page) => {
   await page.getByRole("heading", { name: "Resgate concluído" }).waitFor();
   check("desktop: relatório mostra pontuação", await page.getByText("Pontuação", { exact: true }).isVisible());
   check("desktop: relatório mostra recorde novo", await page.getByText("Novo recorde!").isVisible());
+  check("desktop: relatório explica o multiplicador", await page.getByText(/Multiplicador da dificuldade Cadete/).isVisible());
   await page.screenshot({ path: join(OUT, "desktop-03-relatorio.png") });
   await page.reload();
   check("desktop: relatório sobrevive ao recarregar", await page.getByRole("heading", { name: "Resgate concluído" }).isVisible());
