@@ -1,24 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { BALANCE, SCENARIO } from "@/sim/config";
+import { BALANCE, DIFFICULTIES, MODULE_NAME } from "@/sim/config";
 import { formatClock } from "@/sim/engine";
 import { buildReport } from "@/sim/insights";
+import { computeScore, type RecordResult } from "@/sim/scoring";
 import type { LogEntry, LogKind, SimState } from "@/sim/types";
+import { FailureIcon } from "./FailureIcon";
 import {
   IconAlert,
   IconBattery,
   IconBolt,
   IconCheck,
   IconCritical,
+  IconDice,
   IconHeat,
   IconInfo,
+  IconMenu,
   IconOxygen,
   IconPlay,
   IconRestart,
   IconSnow,
   IconWrench,
 } from "./Icons";
+import { MedalBadge } from "./MissionSelect";
 
 const KIND: Record<LogKind, { label: string; Icon: typeof IconInfo }> = {
   info: { label: "INFO", Icon: IconInfo },
@@ -29,7 +34,7 @@ const KIND: Record<LogKind, { label: string; Icon: typeof IconInfo }> = {
 };
 
 export function LogPanel({ log }: { log: LogEntry[] }) {
-  const recent = [...log].reverse().slice(0, 14);
+  const recent = [...log].reverse().slice(0, 16);
   return (
     <section className="panel log" aria-labelledby="log-title">
       <h2 id="log-title" className="panel-title">
@@ -54,13 +59,20 @@ export function LogPanel({ log }: { log: LogEntry[] }) {
   );
 }
 
-const INTRO_STEPS = [
+function missionTitle(state: SimState): string {
+  const m = state.mission;
+  if (m.kind === "training") return "Treinamento";
+  if (m.kind === "daily") return `Desafio do dia · ${DIFFICULTIES[m.difficulty].label}`;
+  return `Missão sorteada · ${DIFFICULTIES[m.difficulty].label}`;
+}
+
+const TRAINING_STEPS = [
   {
     title: "Módulo Kestrel em perigo",
     body: (
       <>
         <p>
-          Você controla um módulo orbital danificado. O resgate chega em{" "}
+          Você controla um módulo orbital danificado. A nave de resgate <strong>Aurora</strong> acopla em{" "}
           <strong>{formatClock(BALANCE.missionDurationS)}</strong> de jogo ativo. Mantenha o módulo habitável até lá.
         </p>
         <p>
@@ -74,19 +86,18 @@ const INTRO_STEPS = [
     body: (
       <ul className="intro-list">
         <li>
-          <IconBattery /> <strong>Energia:</strong> o gerador tem {BALANCE.generator.nominalKw} kW. Se o pedido passar disso, a
-          bateria cobre a diferença enquanto durar.
+          <IconBattery /> <strong>Energia:</strong> se o pedido passar da geração, a bateria cobre a diferença enquanto durar.
         </li>
         <li>
-          <IconHeat /> <strong>Calor:</strong> equipamentos e reparos esquentam o módulo. Acima de {BALANCE.generator.derateStartC}{" "}
-          °C o gerador rende menos, e isso pode virar uma cascata.
+          <IconHeat /> <strong>Calor:</strong> equipamentos e reparos esquentam o módulo. Acima de {BALANCE.generator.derateStartC} °C o
+          gerador rende menos, e isso pode virar uma cascata.
         </li>
         <li>
           <IconOxygen /> <strong>Oxigênio:</strong> a tripulação consome sem parar. O suporte de vida repõe quando recebe potência.
         </li>
         <li>
-          <IconCritical /> Calor acima de {BALANCE.heat.criticalC} °C ou oxigênio abaixo de {BALANCE.oxygen.criticalPct}% por{" "}
-          {BALANCE.critical.graceS} s seguidos: módulo perdido. Um contador mostra quanto tempo resta para reagir.
+          <IconCritical /> Calor acima de {BALANCE.heat.criticalC} °C ou oxigênio abaixo de {BALANCE.oxygen.criticalPct}% por tempo
+          demais: módulo perdido. Um contador mostra quanto tempo resta para reagir.
         </li>
       </ul>
     ),
@@ -96,14 +107,14 @@ const INTRO_STEPS = [
     body: (
       <ul className="intro-list">
         <li>
-          <IconAlert /> Três falhas vão acontecer. Os sensores avisam 20 s antes.
+          <IconAlert /> Os sensores avisam antes de cada falha. A linha do tempo no topo mostra a nave chegando e as falhas previstas.
         </li>
         <li>
-          <IconWrench /> Cada falha tem uma <strong>resposta rápida</strong> (barata, com efeito residual) e um{" "}
-          <strong>reparo completo</strong> (caro e demorado, sem resíduo). Uma equipe, um reparo por vez.
+          <IconWrench /> Cada falha tem uma <strong>resposta rápida</strong> (barata, com sequela) e um <strong>reparo completo</strong>{" "}
+          (caro e demorado, sem sequela). Uma equipe, um reparo por vez.
         </li>
         <li>
-          <IconCheck /> A escolha vale até o resgate. O progresso fica salvo neste navegador; ao voltar, a missão retoma em pausa.
+          <IconCritical /> Falhas esperando reparo <strong>pioram</strong> com o tempo. Escolha a ordem com cuidado.
         </li>
       </ul>
     ),
@@ -116,8 +127,7 @@ const INTRO_STEPS = [
           <IconSnow /> O módulo começa com só <strong>2 kW na refrigeração</strong> e o calor já está subindo.
         </p>
         <p>
-          Assim que a missão começar, toque em <strong>+</strong> na linha <strong>Refrigeração</strong> até chegar a{" "}
-          <strong>4 kW</strong>. O gerador tem folga para isso.
+          Assim que a missão começar, toque em <strong>+</strong> na linha <strong>Refrigeração</strong> até chegar a <strong>4 kW</strong>.
         </p>
         <p className="muted">Pause a qualquer momento com o botão Pausar ou a barra de espaço.</p>
       </>
@@ -125,20 +135,55 @@ const INTRO_STEPS = [
   },
 ];
 
-export function IntroOverlay({ onStart }: { onStart: () => void }) {
+export function IntroOverlay({ state, onStart, onMenu }: { state: SimState; onStart: () => void; onMenu: () => void }) {
   const [i, setI] = useState(0);
-  const stepInfo = INTRO_STEPS[i];
-  const last = i === INTRO_STEPS.length - 1;
+  if (state.mission.kind !== "training") {
+    const d = DIFFICULTIES[state.mission.difficulty];
+    return (
+      <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+        <div className="modal intro">
+          <p className="kicker">Briefing · semente {state.mission.seed}</p>
+          <h2 id="intro-title">{missionTitle(state)}</h2>
+          <ul className="intro-list">
+            <li>
+              <IconCritical /> <strong>{state.failures.length} falhas</strong> vão acontecer, em ordem e horários desconhecidos. Avisos com{" "}
+              {d.warningLeadS} s de antecedência.
+            </li>
+            <li>
+              <IconBolt /> Gerador de <strong>{String(d.generatorKw).replace(".", ",")} kW</strong>. Tolerância no nível crítico:{" "}
+              <strong>{d.graceS} s</strong>.
+            </li>
+            <li>
+              <IconWrench /> Falhas esperando reparo pioram até +{Math.round(BALANCE.escalation.max * 100)}%.
+            </li>
+            <li>
+              <IconCheck /> Pontuação ×{String(d.scoreMultiplier).replace(".", ",")}. Medalha de ouro a partir de {d.medals.gold} pontos-base.
+            </li>
+          </ul>
+          <div className="modal-actions">
+            <button type="button" className="btn btn-ghost" onClick={onMenu}>
+              <IconMenu /> Menu
+            </button>
+            <button type="button" className="btn btn-primary" onClick={onStart} autoFocus>
+              <IconPlay /> Iniciar missão
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  const stepInfo = TRAINING_STEPS[i];
+  const last = i === TRAINING_STEPS.length - 1;
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="intro-title">
       <div className="modal intro">
         <p className="kicker">
-          {SCENARIO.name} · {i + 1}/{INTRO_STEPS.length}
+          Treinamento · {i + 1}/{TRAINING_STEPS.length}
         </p>
         <h2 id="intro-title">{stepInfo.title}</h2>
         <div className="intro-body">{stepInfo.body}</div>
         <div className="dots" aria-hidden>
-          {INTRO_STEPS.map((_, k) => (
+          {TRAINING_STEPS.map((_, k) => (
             <span key={k} className={k === i ? "dot on" : "dot"} />
           ))}
         </div>
@@ -167,28 +212,20 @@ export function IntroOverlay({ onStart }: { onStart: () => void }) {
   );
 }
 
-function RestartButton({
-  onRestart,
-  label = "Reiniciar missão",
-  confirm = true,
-}: {
-  onRestart: () => void;
-  label?: string;
-  confirm?: boolean;
-}) {
+function ConfirmButton({ label, question, confirmLabel, onConfirm, Icon }: { label: string; question: string; confirmLabel: string; onConfirm: () => void; Icon: typeof IconInfo }) {
   const [confirming, setConfirming] = useState(false);
   if (!confirming) {
     return (
-      <button type="button" className={confirm ? "btn" : "btn btn-primary"} onClick={() => (confirm ? setConfirming(true) : onRestart())}>
-        <IconRestart /> {label}
+      <button type="button" className="btn" onClick={() => setConfirming(true)}>
+        <Icon /> {label}
       </button>
     );
   }
   return (
     <div className="inline-confirm">
-      <span>Apagar o progresso salvo e começar do zero?</span>
-      <button type="button" className="btn btn-danger" onClick={onRestart}>
-        Sim, reiniciar
+      <span>{question}</span>
+      <button type="button" className="btn btn-danger" onClick={onConfirm}>
+        {confirmLabel}
       </button>
       <button type="button" className="btn" onClick={() => setConfirming(false)}>
         Cancelar
@@ -202,11 +239,13 @@ export function PauseOverlay({
   resumedFromSave,
   onResume,
   onRestart,
+  onMenu,
 }: {
   state: SimState;
   resumedFromSave: boolean;
   onResume: () => void;
   onRestart: () => void;
+  onMenu: () => void;
 }) {
   const remaining = BALANCE.missionDurationS - state.t;
   const resolved = state.failures.filter((f) => f.status === "resolved").length;
@@ -224,11 +263,14 @@ export function PauseOverlay({
           <p>O tempo de jogo não corre enquanto a missão está em pausa.</p>
         )}
         <p className="mono pause-stats">
+          {missionTitle(state)} · semente {state.mission.seed}
+          <br />
           Resgate em {formatClock(remaining)} · falhas resolvidas {resolved}/{state.failures.length}
           {state.repair ? " · reparo em andamento" : ""}
         </p>
         <div className="modal-actions">
-          <RestartButton onRestart={onRestart} />
+          <ConfirmButton label="Menu" question="Abandonar esta missão e voltar ao menu?" confirmLabel="Abandonar" onConfirm={onMenu} Icon={IconMenu} />
+          <ConfirmButton label="Reiniciar" question="Recomeçar esta missão do zero?" confirmLabel="Sim, reiniciar" onConfirm={onRestart} Icon={IconRestart} />
           <button type="button" className="btn btn-primary" onClick={onResume} autoFocus>
             <IconPlay /> Retomar
           </button>
@@ -238,20 +280,59 @@ export function PauseOverlay({
   );
 }
 
-export function ReportOverlay({ state, onRestart }: { state: SimState; onRestart: () => void }) {
+export function ReportOverlay({
+  state,
+  result,
+  onRestart,
+  onNewSeed,
+  onMenu,
+}: {
+  state: SimState;
+  result: RecordResult | null;
+  onRestart: () => void;
+  onNewSeed: () => void;
+  onMenu: () => void;
+}) {
   const report = buildReport(state);
   if (!report) return null;
+  const score = computeScore(state);
   const won = report.result === "won";
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="report-title">
       <div className={`modal report ${won ? "is-won" : "is-lost"}`}>
-        <p className="kicker">Relatório final · {SCENARIO.moduleName}</p>
+        <p className="kicker">
+          Relatório final · {MODULE_NAME} · {missionTitle(state)}
+        </p>
         <h2 id="report-title">
           {won ? <IconCheck /> : <IconCritical />} {report.title}
         </h2>
+        <div className="score-hero">
+          <div>
+            <span className="label">Pontuação</span>
+            <strong className="mono">{score.total}</strong>
+            {score.multiplier !== 1 ? (
+              <span className="sub mono">
+                {score.base} × {String(score.multiplier).replace(".", ",")}
+              </span>
+            ) : null}
+          </div>
+          <div className="score-medal">
+            {score.medal ? <MedalBadge medal={score.medal} /> : <span className="muted">Sem medalha</span>}
+            {result?.isNewBest ? <span className="new-best">Novo recorde!</span> : result ? <span className="muted small">Recorde: {result.entry.best}</span> : null}
+          </div>
+        </div>
         <p className="report-cause">
           <strong>{won ? "Estado no resgate:" : "Causa da derrota:"}</strong> {report.cause}
         </p>
+        <dl className="report-lines">
+          {score.items.map((it) => (
+            <div key={it.label}>
+              <dt>{it.label}</dt>
+              <dd className="mono">{it.points > 0 ? `+${it.points}` : it.points}</dd>
+            </div>
+          ))}
+        </dl>
+        <h3>Módulo</h3>
         <dl className="report-lines">
           {report.lines.map((l) => (
             <div key={l.label}>
@@ -262,14 +343,31 @@ export function ReportOverlay({ state, onRestart }: { state: SimState; onRestart
         </dl>
         <h3>Decisões</h3>
         <ul className="report-decisions">
-          {report.decisions.map((d) => (
-            <li key={d}>{d}</li>
+          {state.failures.map((f, i) => (
+            <li key={f.id}>
+              <FailureIcon id={f.id} /> {report.decisions[i]}
+            </li>
           ))}
         </ul>
+        <p className="muted small">
+          Semente <strong className="mono">{state.mission.seed}</strong>: compartilhe para alguém jogar exatamente a mesma missão
+          {state.mission.kind === "random" ? ` na dificuldade ${DIFFICULTIES[state.mission.difficulty].label}` : ""}.
+        </p>
         <div className="modal-actions">
-          <RestartButton onRestart={onRestart} label="Jogar de novo" confirm={false} />
+          <button type="button" className="btn btn-ghost" onClick={onMenu}>
+            <IconMenu /> Menu
+          </button>
+          <button type="button" className="btn" onClick={onRestart}>
+            <IconRestart /> Repetir esta missão
+          </button>
+          {state.mission.kind === "random" ? (
+            <button type="button" className="btn btn-primary" onClick={onNewSeed} autoFocus>
+              <IconDice /> Nova missão
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
   );
 }
+

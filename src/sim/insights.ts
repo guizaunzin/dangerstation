@@ -10,6 +10,7 @@ import {
   DEFAULT_CONFIG,
   failureDef,
   formatClock,
+  graceS,
   remainingS,
   type SimConfig,
 } from "./engine";
@@ -52,7 +53,7 @@ export function activeAlerts(state: SimState, flows: Flows = computeFlows(state)
         level: "warning",
         text: `${cause === "heat" ? "Calor" : "Oxigênio"} fora do crítico — margem se recuperando (${Math.ceil(
           criticalCountdown(state, cause, cfg),
-        )} s de ${b.critical.graceS} s)`,
+        )} s de ${graceS(state, cfg)} s)`,
       });
     }
   }
@@ -73,7 +74,10 @@ export function activeAlerts(state: SimState, flows: Flows = computeFlows(state)
   }
   for (const f of state.failures) {
     const def = failureDef(f.id, cfg);
-    if (f.status === "active") out.push({ id: `failure-${f.id}`, level: "critical", text: `Falha ativa: ${def.title}` });
+    if (f.status === "active") {
+      const worse = f.escalation > 0.005 ? ` — piorando (+${Math.round(f.escalation * 100)}%)` : "";
+      out.push({ id: `failure-${f.id}`, level: "critical", text: `Falha ativa: ${def.title}${worse}` });
+    }
     if (f.status === "repairing") out.push({ id: `failure-${f.id}`, level: "warning", text: `Em reparo: ${def.title}` });
     if (f.status === "warned") out.push({ id: `warn-${f.id}`, level: "info", text: `Aviso dos sensores: ${def.title} iminente` });
   }
@@ -102,13 +106,20 @@ export interface BatteryStatus {
 }
 
 export function batteryStatus(state: SimState, flows: Flows, cfg: SimConfig = DEFAULT_CONFIG): BatteryStatus {
-  const pct = batteryPct(state, cfg);
   if (flows.batteryCovering) {
     return { trend: "down", text: `Cobrindo déficit: demanda ${dec(flows.demandKw, 1)} kW > geração ${dec(flows.generatorKw, 1)} kW` };
   }
   if (flows.unmetKw > 0.05) return { trend: "stable", text: "Esgotada: sem reserva para cobrir o déficit" };
   if (flows.batteryKw > 0.01) return { trend: "up", text: `Recarregando com excedente de ${dec(flows.batteryKw, 1)} kW` };
-  if (pct >= 99.99) return { trend: "stable", text: "Carga completa" };
+  if (state.batteryKj >= flows.batteryCapacityKj - 0.01) {
+    return {
+      trend: "stable",
+      text:
+        flows.batteryCapacityKj < cfg.balance.battery.capacityKj - 0.01
+          ? `Carga completa da capacidade restante (${Math.round(flows.modifiers.batteryCapacityFactor * 100)}%)`
+          : "Carga completa",
+    };
+  }
   if (flows.chargeBlocked) {
     return { trend: "stable", text: `Recarga bloqueada: proteção térmica acima de ${cfg.balance.battery.chargeBlockedAboveC} °C` };
   }
@@ -143,11 +154,11 @@ export function buildReport(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): F
         ? "Módulo habitável e estável na chegada do resgate."
         : `Módulo habitável no resgate, mas no limite: ${issues.join(", ")}.`;
   } else if (state.outcome.cause === "heat") {
-    cause = `Superaquecimento: o calor ficou acima de ${b.heat.criticalC} °C por ${b.critical.graceS} s, faltando ${formatClock(
+    cause = `Superaquecimento: o calor ficou acima de ${b.heat.criticalC} °C por ${graceS(state, cfg)} s, faltando ${formatClock(
       remainingS(state, cfg),
     )} para o resgate.`;
   } else {
-    cause = `Hipóxia: o oxigênio ficou abaixo de ${b.oxygen.criticalPct}% por ${b.critical.graceS} s, faltando ${formatClock(
+    cause = `Hipóxia: o oxigênio ficou abaixo de ${b.oxygen.criticalPct}% por ${graceS(state, cfg)} s, faltando ${formatClock(
       remainingS(state, cfg),
     )} para o resgate.`;
   }

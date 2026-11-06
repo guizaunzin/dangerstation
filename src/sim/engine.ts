@@ -2,19 +2,24 @@
  * Motor determinístico da missão. Funções puras: recebem um estado e devolvem um novo.
  * O tempo avança em passos fixos de BALANCE.tickS; a interface decide quando chamar `step`.
  */
-import { BALANCE, SCENARIO, SAVE_VERSION, type Balance } from "./config";
+import { BALANCE, DIFFICULTIES, FAILURES, MODULE_NAME, SAVE_VERSION, type Balance } from "./config";
+import { scheduleFor, trainingMission } from "./random";
 import type {
   Allocation,
   CriticalCause,
+  DifficultyDef,
+  DifficultyId,
   FailureDef,
   FailureId,
+  FailureState,
   Flows,
   LogEntry,
   LogKind,
+  MissionSpec,
   Modifiers,
   RepairOption,
   RepairOptionId,
-  Scenario,
+  ScheduledFailure,
   SimState,
   SystemId,
   Term,
@@ -22,10 +27,11 @@ import type {
 
 export interface SimConfig {
   balance: Balance;
-  scenario: Scenario;
+  failures: Record<FailureId, FailureDef>;
+  difficulties: Record<DifficultyId, DifficultyDef>;
 }
 
-export const DEFAULT_CONFIG: SimConfig = { balance: BALANCE, scenario: SCENARIO };
+export const DEFAULT_CONFIG: SimConfig = { balance: BALANCE, failures: FAILURES, difficulties: DIFFICULTIES };
 
 const EPS = 1e-9;
 
@@ -57,32 +63,40 @@ export function formatClock(seconds: number): string {
 }
 
 export function failureDef(id: FailureId, cfg: SimConfig = DEFAULT_CONFIG): FailureDef {
-  const def = cfg.scenario.failures.find((f) => f.id === id);
+  const def = cfg.failures[id];
   if (!def) throw new Error(`Falha desconhecida: ${id}`);
   return def;
 }
 
-export function repairOption(
-  id: FailureId,
-  option: RepairOptionId,
-  cfg: SimConfig = DEFAULT_CONFIG,
-): RepairOption {
+export function repairOption(id: FailureId, option: RepairOptionId, cfg: SimConfig = DEFAULT_CONFIG): RepairOption {
   return failureDef(id, cfg).options[option];
 }
 
-export function createInitialState(cfg: SimConfig = DEFAULT_CONFIG): SimState {
+export function difficultyOf(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): DifficultyDef {
+  return cfg.difficulties[state.mission.difficulty];
+}
+
+export function graceS(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): number {
+  return difficultyOf(state, cfg).graceS;
+}
+
+export function createInitialState(
+  mission: MissionSpec = trainingMission(),
+  cfg: SimConfig = DEFAULT_CONFIG,
+  schedule: ScheduledFailure[] = scheduleFor(mission),
+): SimState {
   const b = cfg.balance;
   const batteryKj = (b.battery.capacityKj * b.battery.initialPct) / 100;
-  const state: SimState = {
+  return {
     version: SAVE_VERSION,
-    scenarioId: cfg.scenario.id,
+    mission: { ...mission },
     phase: "intro",
     t: 0,
     allocation: { ...b.allocation.initial },
     batteryKj,
     heatC: b.heat.initialC,
     oxygenPct: b.oxygen.initialPct,
-    failures: cfg.scenario.failures.map((f) => ({ id: f.id, status: "pending" })),
+    failures: [...schedule].sort((a, b2) => a.at - b2.at).map((f) => ({ ...f, status: "pending" as const, escalation: 0 })),
     repair: null,
     critical: { heat: 0, oxygen: 0 },
     log: [],
@@ -98,7 +112,6 @@ export function createInitialState(cfg: SimConfig = DEFAULT_CONFIG): SimState {
     outcome: null,
     tutorial: { firstAdjustDone: false },
   };
-  return state;
 }
 
 function pushLog(state: SimState, kind: LogKind, text: string, tag?: LogEntry["tag"], cfg = DEFAULT_CONFIG) {
@@ -117,29 +130,91 @@ function pushLog(state: SimState, kind: LogKind, text: string, tag?: LogEntry["t
 const BASE_MODIFIERS: Modifiers = {
   generatorFactor: 1,
   coolingFactor: 1,
+  lifeFactor: 1,
   leakPerS: 0,
   extraHeatPerS: 0,
+  batteryCapacityFactor: 1,
+  dischargeFactor: 1,
 };
+
+const FACTOR_KEYS = ["generatorFactor", "coolingFactor", "lifeFactor", "batteryCapacityFactor", "dischargeFactor"] as const;
+const RATE_KEYS = ["leakPerS", "extraHeatPerS"] as const;
+
+/** Aplica a gravidade a um efeito: fatores se afastam mais de 1, taxas crescem. */
+export function scaleModifiers(mods: Partial<Modifiers>, severity: number): Partial<Modifiers> {
+  const out: Partial<Modifiers> = {};
+  for (const k of FACTOR_KEYS) {
+    const v = mods[k];
+    if (v !== undefined) out[k] = round(clamp(1 - (1 - v) * severity, 0.05, 1), 4);
+  }
+  for (const k of RATE_KEYS) {
+    const v = mods[k];
+    if (v !== undefined) out[k] = round(v * severity, 4);
+  }
+  return out;
+}
 
 function applyModifiers(target: Modifiers, mod: Partial<Modifiers> | undefined) {
   if (!mod) return;
-  if (mod.generatorFactor !== undefined) target.generatorFactor *= mod.generatorFactor;
-  if (mod.coolingFactor !== undefined) target.coolingFactor *= mod.coolingFactor;
-  if (mod.leakPerS !== undefined) target.leakPerS += mod.leakPerS;
-  if (mod.extraHeatPerS !== undefined) target.extraHeatPerS += mod.extraHeatPerS;
+  for (const k of FACTOR_KEYS) if (mod[k] !== undefined) target[k] *= mod[k]!;
+  for (const k of RATE_KEYS) if (mod[k] !== undefined) target[k] += mod[k]!;
+}
+
+/** Intensidade atual: gravidade sorteada × agravamento por falta de reparo. */
+export function effectiveSeverity(f: FailureState): number {
+  return f.severity * (1 + (f.escalation ?? 0));
+}
+
+/** Efeito ativo de uma falha já com a gravidade do evento. */
+export function activeEffect(f: FailureState, cfg: SimConfig = DEFAULT_CONFIG): Partial<Modifiers> {
+  return scaleModifiers(failureDef(f.id, cfg).active, effectiveSeverity(f));
+}
+
+export interface ModifierSource {
+  failureId: FailureId;
+  label: string;
+  mods: Partial<Modifiers>;
+}
+
+/** Cada falha ou consequência que altera o módulo agora, com o rótulo para explicar ao jogador. */
+export function modifierSources(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): ModifierSource[] {
+  const out: ModifierSource[] = [];
+  for (const f of state.failures) {
+    const def = failureDef(f.id, cfg);
+    if (f.status === "active" || f.status === "repairing") {
+      out.push({ failureId: f.id, label: def.title, mods: activeEffect(f, cfg) });
+      if (f.status === "repairing" && state.repair?.failureId === f.id) {
+        const during = def.options[state.repair.option].during;
+        if (during) out.push({ failureId: f.id, label: `Reparo em andamento: ${def.options[state.repair.option].label}`, mods: during });
+      }
+    }
+    if (f.status === "resolved" && f.resolution) {
+      const after = def.options[f.resolution].after;
+      if (Object.keys(after).length > 0) {
+        out.push({ failureId: f.id, label: `Sequela: ${def.options[f.resolution].label}`, mods: after });
+      }
+    }
+  }
+  return out;
 }
 
 export function computeModifiers(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): Modifiers {
   const mods = { ...BASE_MODIFIERS };
-  for (const f of state.failures) {
-    const def = failureDef(f.id, cfg);
-    if (f.status === "active" || f.status === "repairing") applyModifiers(mods, def.active);
-    if (f.status === "repairing" && state.repair?.failureId === f.id) {
-      applyModifiers(mods, def.options[state.repair.option].during);
-    }
-    if (f.status === "resolved" && f.resolution) applyModifiers(mods, def.options[f.resolution].after);
-  }
+  for (const s of modifierSources(state, cfg)) applyModifiers(mods, s.mods);
   return mods;
+}
+
+/** Descrição curta e numérica de um efeito, para alarmes e cartões. */
+export function describeEffect(mods: Partial<Modifiers>): string {
+  const parts: string[] = [];
+  if (mods.generatorFactor !== undefined) parts.push(`gerador a ${Math.round(mods.generatorFactor * 100)}%`);
+  if (mods.coolingFactor !== undefined) parts.push(`refrigeração a ${Math.round(mods.coolingFactor * 100)}%`);
+  if (mods.lifeFactor !== undefined) parts.push(`suporte de vida a ${Math.round(mods.lifeFactor * 100)}%`);
+  if (mods.extraHeatPerS !== undefined) parts.push(`+${dec(mods.extraHeatPerS, 2)} °C/s de calor`);
+  if (mods.leakPerS !== undefined) parts.push(`perda de ${dec(mods.leakPerS, 2)} %/s de oxigênio`);
+  if (mods.dischargeFactor !== undefined) parts.push(`descarga da bateria a ${Math.round(mods.dischargeFactor * 100)}%`);
+  if (mods.batteryCapacityFactor !== undefined) parts.push(`capacidade da bateria a ${Math.round(mods.batteryCapacityFactor * 100)}%`);
+  return parts.join(", ");
 }
 
 export function generatorHeatEfficiency(heatC: number, balance: Balance = BALANCE): number {
@@ -149,13 +224,21 @@ export function generatorHeatEfficiency(heatC: number, balance: Balance = BALANC
   return 1 - k * (1 - g.minEfficiency);
 }
 
+export function batteryCapacityKj(state: SimState, cfg: SimConfig = DEFAULT_CONFIG, mods = computeModifiers(state, cfg)) {
+  return cfg.balance.battery.capacityKj * mods.batteryCapacityFactor;
+}
+
 /** Calcula os fluxos do próximo passo a partir do estado atual (sem alterar o estado). */
 export function computeFlows(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): Flows {
   const b = cfg.balance;
   const dt = b.tickS;
-  const mods = computeModifiers(state, cfg);
+  const sources = modifierSources(state, cfg);
+  const mods = { ...BASE_MODIFIERS };
+  for (const s of sources) applyModifiers(mods, s.mods);
   const heatEff = generatorHeatEfficiency(state.heatC, b);
-  const generatorKw = b.generator.nominalKw * mods.generatorFactor * heatEff;
+  const generatorKw = difficultyOf(state, cfg).generatorKw * mods.generatorFactor * heatEff;
+  const capacityKj = b.battery.capacityKj * mods.batteryCapacityFactor;
+  const usableKj = Math.min(state.batteryKj, capacityKj);
 
   const job = state.repair;
   const jobOption = job ? repairOption(job.failureId, job.option, cfg) : null;
@@ -174,13 +257,14 @@ export function computeFlows(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): 
 
   if (generatorKw + EPS >= demandKw) {
     const surplus = generatorKw - demandKw;
-    const room = (b.battery.capacityKj - state.batteryKj) / dt;
+    const room = Math.max(0, (capacityKj - usableKj) / dt);
     const charge = chargeBlocked ? 0 : Math.max(0, Math.min(surplus, b.battery.maxChargeKw, room));
     batteryKw = charge;
     spareKw = surplus - charge;
   } else {
     const deficit = demandKw - generatorKw;
-    const discharge = Math.max(0, Math.min(deficit, b.battery.maxDischargeKw, state.batteryKj / dt));
+    const maxDischarge = b.battery.maxDischargeKw * mods.dischargeFactor;
+    const discharge = Math.max(0, Math.min(deficit, maxDischarge, usableKj / dt));
     batteryKw = -discharge;
     supplyRatio = demandKw > 0 ? (generatorKw + discharge) / demandKw : 1;
     unmetKw = deficit - discharge;
@@ -199,8 +283,10 @@ export function computeFlows(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): 
     { label: "Equipamentos do módulo", value: h.baseGainPerS },
     { label: `Carga elétrica (${dec(inUseKw, 1)} kW em uso)`, value: h.gainPerKw * inUseKw },
   ];
-  if (mods.extraHeatPerS > 0) heatTerms.push({ label: "Barramento auxiliar aquecido", value: mods.extraHeatPerS });
-  if (jobOption && repairSpeed > 0) {
+  for (const s of sources) {
+    if (s.mods.extraHeatPerS) heatTerms.push({ label: s.label, value: s.mods.extraHeatPerS });
+  }
+  if (jobOption && repairSpeed > 0 && jobOption.heatPerS > 0) {
     heatTerms.push({ label: `Reparo: ${jobOption.label}`, value: jobOption.heatPerS * repairSpeed });
   }
   const coolingLabel =
@@ -216,15 +302,14 @@ export function computeFlows(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): 
 
   const o = b.oxygen;
   const oxygenTerms: Term[] = [{ label: "Consumo da tripulação", value: -o.crewUsePerS }];
-  if (mods.leakPerS > 0) {
-    const leakFailure = state.failures.find((f) => f.id === "leak");
-    const label = leakFailure?.status === "resolved" ? "Perda residual da vedação rápida" : "Vazamento na antepara";
-    oxygenTerms.push({ label, value: -mods.leakPerS });
+  for (const s of sources) {
+    if (s.mods.leakPerS) oxygenTerms.push({ label: s.label, value: -s.mods.leakPerS });
   }
-  oxygenTerms.push({
-    label: `Suporte de vida (${dec(supplied.life, 1)} kW)`,
-    value: o.recoveryPerKw * supplied.life,
-  });
+  const lifeLabel =
+    mods.lifeFactor < 1 - EPS
+      ? `Suporte de vida (${dec(supplied.life, 1)} kW a ${Math.round(mods.lifeFactor * 100)}% de rendimento)`
+      : `Suporte de vida (${dec(supplied.life, 1)} kW)`;
+  oxygenTerms.push({ label: lifeLabel, value: o.recoveryPerKw * supplied.life * mods.lifeFactor });
   let oxygenRate = oxygenTerms.reduce((s, x) => s + x.value, 0);
   if (state.oxygenPct >= 100 - EPS && oxygenRate > 0) oxygenRate = 0;
 
@@ -232,6 +317,7 @@ export function computeFlows(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): 
     modifiers: mods,
     generatorKw,
     generatorHeatEfficiency: heatEff,
+    batteryCapacityKj: capacityKj,
     demand,
     demandKw,
     supplyRatio,
@@ -249,6 +335,7 @@ export function computeFlows(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): 
   };
 }
 
+/** Carga da bateria em % da capacidade nominal. */
 export function batteryPct(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): number {
   return (state.batteryKj / cfg.balance.battery.capacityKj) * 100;
 }
@@ -259,7 +346,7 @@ export function remainingS(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): nu
 
 /** Tempo até a perda do módulo para uma causa em nível crítico (s). */
 export function criticalCountdown(state: SimState, cause: CriticalCause, cfg: SimConfig = DEFAULT_CONFIG): number {
-  return Math.max(0, cfg.balance.critical.graceS - state.critical[cause]);
+  return Math.max(0, graceS(state, cfg) - state.critical[cause]);
 }
 
 export function isHeatCritical(heatC: number, cfg: SimConfig = DEFAULT_CONFIG) {
@@ -275,6 +362,7 @@ export function step(prev: SimState, cfg: SimConfig = DEFAULT_CONFIG): SimState 
   if (prev.phase !== "active" || prev.outcome) return prev;
   const b = cfg.balance;
   const dt = b.tickS;
+  const grace = graceS(prev, cfg);
   const flows = computeFlows(prev, cfg);
   const s = clone(prev);
 
@@ -284,13 +372,6 @@ export function step(prev: SimState, cfg: SimConfig = DEFAULT_CONFIG): SimState 
   s.oxygenPct = round(clamp(s.oxygenPct + flows.oxygenRate * dt, 0, 100));
   if (s.repair) s.repair.progressS = round(s.repair.progressS + flows.repairSpeed * dt);
   s.t = round(s.t + dt, 3);
-
-  // Estatísticas.
-  s.stats.peakHeatC = Math.max(s.stats.peakHeatC, s.heatC);
-  s.stats.minOxygenPct = Math.min(s.stats.minOxygenPct, s.oxygenPct);
-  s.stats.minBatteryPct = Math.min(s.stats.minBatteryPct, round(batteryPct(s, cfg), 3));
-  if (flows.batteryCovering) s.stats.batteryCoverSeconds += dt;
-  if (flows.unmetKw > EPS) s.stats.unmetSeconds += dt;
 
   // Avisos de energia (apenas na transição, para não poluir o registro).
   const prevPct = batteryPct(prev, cfg);
@@ -320,49 +401,73 @@ export function step(prev: SimState, cfg: SimConfig = DEFAULT_CONFIG): SimState 
   // Eventos programados.
   for (const f of s.failures) {
     const def = failureDef(f.id, cfg);
-    if (f.status === "pending" && s.t >= def.warnAt && s.t < def.at) {
+    if (f.status === "pending" && s.t >= f.warnAt && s.t < f.at) {
       f.status = "warned";
-      pushLog(s, "warn", def.warnText, undefined, cfg);
+      pushLog(s, "warn", `Sensores: ${def.warnText} ${def.title} em ${Math.round(f.at - s.t)} s.`, undefined, cfg);
     }
-    if ((f.status === "pending" || f.status === "warned") && s.t >= def.at) {
+    if ((f.status === "pending" || f.status === "warned") && s.t >= f.at) {
       f.status = "active";
       f.startedAt = s.t;
-      pushLog(s, "alert", def.alertText, undefined, cfg);
+      pushLog(s, "alert", `Falha: ${def.title}. ${def.alertText} Efeito: ${describeEffect(activeEffect(f, cfg))}.`, undefined, cfg);
     }
   }
 
+  // Falhas sem reparo pioram com o tempo (a equipe trabalhando segura o agravamento).
+  for (const f of s.failures) {
+    if (f.status !== "active") continue;
+    const before = f.escalation ?? 0;
+    f.escalation = round(Math.min(b.escalation.max, before + b.escalation.perS * dt));
+    for (const mark of [0.2, 0.4, 0.6]) {
+      if (before < mark - EPS && f.escalation >= mark - EPS) {
+        pushLog(s, "warn", `${failureDef(f.id, cfg).title} piorou: +${Math.round(mark * 100)}% de intensidade sem reparo.`, undefined, cfg);
+      }
+    }
+  }
+
+  // A capacidade da bateria pode ter encolhido por uma falha ou consequência.
+  const cap = batteryCapacityKj(s, cfg);
+  if (s.batteryKj > cap + EPS) s.batteryKj = round(cap);
+
+  // Estatísticas.
+  s.stats.peakHeatC = Math.max(s.stats.peakHeatC, s.heatC);
+  s.stats.minOxygenPct = Math.min(s.stats.minOxygenPct, s.oxygenPct);
+  s.stats.minBatteryPct = Math.min(s.stats.minBatteryPct, round(batteryPct(s, cfg), 3));
+  if (flows.batteryCovering) s.stats.batteryCoverSeconds += dt;
+  if (flows.unmetKw > EPS) s.stats.unmetSeconds += dt;
+
   // Níveis críticos.
-  const causes: [CriticalCause, boolean, string, string][] = [
-    ["heat", isHeatCritical(s.heatC, cfg), "Calor em nível crítico!", "Calor saiu do nível crítico."],
-    ["oxygen", isOxygenCritical(s.oxygenPct, cfg), "Oxigênio em nível crítico!", "Oxigênio saiu do nível crítico."],
+  const checks: [CriticalCause, boolean, boolean, string, string][] = [
+    ["heat", isHeatCritical(s.heatC, cfg), isHeatCritical(prev.heatC, cfg), "Calor em nível crítico!", "Calor saiu do nível crítico."],
+    [
+      "oxygen",
+      isOxygenCritical(s.oxygenPct, cfg),
+      isOxygenCritical(prev.oxygenPct, cfg),
+      "Oxigênio em nível crítico!",
+      "Oxigênio saiu do nível crítico.",
+    ],
   ];
   let anyCritical = false;
-  for (const [cause, isCrit, enterText, leaveText] of causes) {
+  for (const [cause, isCrit, wasCrit, enterText, leaveText] of checks) {
     const before = s.critical[cause];
     if (isCrit) {
       anyCritical = true;
-      if (before === 0 || !(cause === "heat" ? isHeatCritical(prev.heatC, cfg) : isOxygenCritical(prev.oxygenPct, cfg))) {
-        pushLog(s, "alert", `${enterText} Perda do módulo em ${Math.ceil(b.critical.graceS - before)} s.`, undefined, cfg);
-      }
+      if (!wasCrit) pushLog(s, "alert", `${enterText} Perda do módulo em ${Math.ceil(grace - before)} s.`, undefined, cfg);
       s.critical[cause] = round(before + dt);
     } else {
-      const wasCrit = cause === "heat" ? isHeatCritical(prev.heatC, cfg) : isOxygenCritical(prev.oxygenPct, cfg);
       if (wasCrit) pushLog(s, "info", leaveText, undefined, cfg);
       s.critical[cause] = round(Math.max(0, before - b.critical.recoveryPerS * dt));
     }
   }
   if (anyCritical) s.stats.criticalSeconds += dt;
 
-  const lostBy = (["heat", "oxygen"] as const).find((c) => s.critical[c] + EPS >= b.critical.graceS);
+  const lostBy = (["heat", "oxygen"] as const).find((c) => s.critical[c] + EPS >= grace);
   if (lostBy) {
     s.outcome = { result: "lost", cause: lostBy, at: s.t };
     s.phase = "ended";
     pushLog(
       s,
       "alert",
-      lostBy === "heat"
-        ? "Módulo perdido: superaquecimento prolongado."
-        : "Módulo perdido: oxigênio insuficiente por tempo demais.",
+      lostBy === "heat" ? "Módulo perdido: superaquecimento prolongado." : "Módulo perdido: oxigênio insuficiente por tempo demais.",
       undefined,
       cfg,
     );
@@ -391,27 +496,20 @@ export function beginMission(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): 
   if (state.phase !== "intro") return state;
   const s = clone(state);
   s.phase = "active";
-  pushLog(s, "info", `${cfg.scenario.moduleName}: missão iniciada. Resgate em ${formatClock(cfg.balance.missionDurationS)}.`, undefined, cfg);
+  pushLog(s, "info", `${MODULE_NAME}: missão iniciada. Resgate em ${formatClock(cfg.balance.missionDurationS)}.`, undefined, cfg);
   return s;
 }
 
 const SYSTEM_SHORT: Record<SystemId, string> = { cooling: "Refrig.", life: "Vida", repair: "Reparos" };
 
-export function setAllocation(
-  state: SimState,
-  system: SystemId,
-  kw: number,
-  cfg: SimConfig = DEFAULT_CONFIG,
-): SimState {
+export function setAllocation(state: SimState, system: SystemId, kw: number, cfg: SimConfig = DEFAULT_CONFIG): SimState {
   if (state.phase === "ended") return state;
   const a = cfg.balance.allocation;
   const value = clamp(Math.round(kw / a.stepKw) * a.stepKw, 0, a.maxPerSystemKw);
   if (value === state.allocation[system]) return state;
   const s = clone(state);
   s.allocation[system] = value;
-  const text = `Distribuição: ${(Object.keys(SYSTEM_SHORT) as SystemId[])
-    .map((k) => `${SYSTEM_SHORT[k]} ${s.allocation[k]} kW`)
-    .join(" · ")}`;
+  const text = `Distribuição: ${(Object.keys(SYSTEM_SHORT) as SystemId[]).map((k) => `${SYSTEM_SHORT[k]} ${s.allocation[k]} kW`).join(" · ")}`;
   pushLog(s, "decision", text, "allocation", cfg);
   if (!s.tutorial.firstAdjustDone && s.allocation.cooling >= 4) {
     s.tutorial.firstAdjustDone = true;
@@ -430,12 +528,7 @@ export function repairBlockReason(state: SimState, failureId: FailureId): Repair
   return null;
 }
 
-export function startRepair(
-  state: SimState,
-  failureId: FailureId,
-  option: RepairOptionId,
-  cfg: SimConfig = DEFAULT_CONFIG,
-): SimState {
+export function startRepair(state: SimState, failureId: FailureId, option: RepairOptionId, cfg: SimConfig = DEFAULT_CONFIG): SimState {
   if (repairBlockReason(state, failureId) !== null) return state;
   const opt = repairOption(failureId, option, cfg);
   const s = clone(state);
@@ -461,28 +554,20 @@ export function abortRepair(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): S
 
 export interface RepairPreview {
   option: RepairOption;
-  /** Demanda total e geração com o reparo em andamento. */
   demandKw: number;
   generatorKw: number;
   batteryKw: number;
   /** Autonomia estimada da bateria com esse déficit (s), ou null se não houver déficit. */
   batteryAutonomyS: number | null;
-  /** Fração atendida se a bateria não der conta. */
   supplyRatio: number;
   /** Duração estimada no ritmo atual (s). */
   etaS: number;
-  /** Calor e oxigênio previstos por segundo durante o reparo. */
   heatRate: number;
   oxygenRate: number;
 }
 
 /** Mostra ao jogador o que acontece se confirmar o reparo, sem alterar o estado. */
-export function previewRepair(
-  state: SimState,
-  failureId: FailureId,
-  option: RepairOptionId,
-  cfg: SimConfig = DEFAULT_CONFIG,
-): RepairPreview {
+export function previewRepair(state: SimState, failureId: FailureId, option: RepairOptionId, cfg: SimConfig = DEFAULT_CONFIG): RepairPreview {
   const opt = repairOption(failureId, option, cfg);
   const hypothetical = clone(state);
   const f = hypothetical.failures.find((x) => x.id === failureId)!;

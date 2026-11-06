@@ -155,3 +155,102 @@ export const IconPlus = (p: P) => (
     <path d="M12 5v14M5 12h14" />
   </Svg>
 );
+
+export const IconSun = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+  </Svg>
+);
+
+export const IconFlame = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 22c4 0 7-2.7 7-6.6 0-3.6-2.5-5.6-3.6-8.4-.9 2-1.9 2.9-3.1 3.3C12.6 7 11.4 4.3 9 2c.4 3.6-4 6.4-4 11.4C5 19.3 8 22 12 22Z" />
+  </Svg>
+);
+
+export const IconFilter = (p: P) => (
+  <Svg {...p}>
+    <rect x="4" y="3" width="16" height="18" rx="3" />
+    <path d="M8 8h8M8 12h8M8 16h8" />
+  </Svg>
+);
+
+export const IconMeteor = (p: P) => (
+  <Svg {...p}>
+    <circle cx="15" cy="15" r="5" />
+    <path d="M2 2l8 8M6 2l6 6M2 6l6 6" />
+  </Svg>
+);
+
+export const IconDrop = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 2s7 7.6 7 12.5A7 7 0 0 1 5 14.5C5 9.6 12 2 12 2Z" />
+  </Svg>
+);
+
+export const IconBatteryWarn = (p: P) => (
+  <Svg {...p}>
+    <rect x="2" y="7" width="17" height="10" rx="2" />
+    <path d="M22 11v2" />
+    <path d="M11 9l-2 3h3l-2 3" />
+  </Svg>
+);
+
+export const IconShip = (p: P) => (
+  <Svg {...p}>
+    <path d="M3 12h4l3-5h6l5 5-5 5h-6l-3-5" />
+    <circle cx="15" cy="12" r="1.5" />
+  </Svg>
+);
+
+export const IconMenu = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 6h16M4 12h16M4 18h16" />
+  </Svg>
+);
+
+export const IconVolume = (p: P) => (
+  <Svg {...p}>
+    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+  </Svg>
+);
+
+export const IconMute = (p: P) => (
+  <Svg {...p}>
+    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+    <path d="m16 9 6 6M22 9l-6 6" />
+  </Svg>
+);
+
+export const IconDice = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="4" />
+    <circle cx="8.5" cy="8.5" r="1" fill="currentColor" />
+    <circle cx="15.5" cy="15.5" r="1" fill="currentColor" />
+    <circle cx="15.5" cy="8.5" r="1" fill="currentColor" />
+    <circle cx="8.5" cy="15.5" r="1" fill="currentColor" />
+  </Svg>
+);
+
+export const IconCalendar = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <path d="M16 2v4M8 2v4M3 10h18" />
+  </Svg>
+);
+
+export const IconMedal = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="15" r="6" />
+    <path d="M8.5 10 6 2h4l2 5 2-5h4l-2.5 8" />
+  </Svg>
+);
+
+export const IconGrad = (p: P) => (
+  <Svg {...p}>
+    <path d="M2 9l10-5 10 5-10 5L2 9Z" />
+    <path d="M6 11v5c3 2 9 2 12 0v-5" />
+  </Svg>
+);
