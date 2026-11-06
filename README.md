@@ -110,4 +110,6 @@ vercel               # deploy de preview
 vercel --prod        # produção
 ```
 
+O `vercel.json` fixa o framework como Next.js. Isso importa quando o projeto foi importado com o repositório ainda vazio: nesse caso a Vercel grava o preset "Other" e serve uma página `404 NOT_FOUND`.
+
 Para conferir um deploy: abra a URL, avance a abertura e veja o relógio "Resgate em" começar a descer depois de **Iniciar missão**. Com `?velocidade=40` a missão inteira leva 30 s.
