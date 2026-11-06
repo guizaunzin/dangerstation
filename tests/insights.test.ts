@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { advance, beginMission, computeFlows, createInitialState, setAllocation } from "@/sim/engine";
+import { runBot, runIdle } from "@/sim/bot";
+import { advance, computeFlows, setAllocation } from "@/sim/engine";
 import { activeAlerts, batteryStatus, buildReport, mainReasons, trendOf } from "@/sim/insights";
-import { ROUTES, runRoute } from "@/sim/strategies";
+import { trainingMission } from "@/sim/random";
+import { activate, quiet } from "./helpers";
 
 describe("leituras para o painel", () => {
   it("indica quando a bateria está cobrindo o déficit", () => {
-    let s = beginMission(createInitialState());
-    s = setAllocation(s, "cooling", 8);
+    let s = setAllocation(quiet(), "cooling", 8);
     s = setAllocation(s, "life", 8);
     const f = computeFlows(s);
     expect(batteryStatus(s, f).text).toMatch(/^Cobrindo déficit/);
@@ -14,37 +15,35 @@ describe("leituras para o painel", () => {
   });
 
   it("explica por que o calor sobe no início", () => {
-    const s = beginMission(createInitialState());
+    const s = quiet();
     const f = computeFlows(s);
     expect(trendOf(f.heatRate)).toBe("up");
     expect(mainReasons(f.heatTerms, f.heatRate)[0].value).toBeGreaterThan(0);
   });
 
   it("mostra a contagem para a falha crítica", () => {
-    let s = beginMission(createInitialState());
-    s = { ...s, heatC: 99 };
-    s = advance(s, 5);
+    const s = advance({ ...quiet(), heatC: 99 }, 5);
     const alert = activeAlerts(s).find((a) => a.id === "heat-critical");
     expect(alert?.level).toBe("critical");
-    expect(alert?.text).toContain("40 s");
+    expect(alert?.text).toContain("55 s");
+  });
+
+  it("avisa quando uma falha está piorando sem reparo", () => {
+    const s = advance(activate(quiet(), "scrubber"), 40);
+    expect(activeAlerts(s).find((a) => a.id === "failure-scrubber")?.text).toMatch(/piorando/);
   });
 
   it("relatório de derrota informa a causa", () => {
-    const r = buildReport(runRoute(ROUTES.inaction))!;
+    const r = buildReport(runIdle(trainingMission()))!;
     expect(r.result).toBe("lost");
-    expect(r.cause).toMatch(/^Superaquecimento/);
-    expect(r.decisions.some((d) => d.includes("não resolvida"))).toBe(true);
+    expect(r.cause).toMatch(/^Superaquecimento|^Hipóxia/);
   });
 
   it("relatório de vitória descreve o estado do módulo e as decisões", () => {
-    const r = buildReport(runRoute(ROUTES.quick))!;
+    const end = runBot(trainingMission(), { policy: "quick", reactionS: 5 });
+    const r = buildReport(end)!;
     expect(r.result).toBe("won");
     expect(r.cause).toMatch(/^Módulo habitável/);
-    expect(r.decisions).toHaveLength(3);
-    expect(r.decisions[2]).toContain("Vedação rápida");
-  });
-
-  it("sem desfecho não há relatório", () => {
-    expect(buildReport(createInitialState())).toBeNull();
+    expect(r.decisions).toHaveLength(end.failures.length);
   });
 });

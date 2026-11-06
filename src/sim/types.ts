@@ -6,9 +6,16 @@ export type SystemId = "cooling" | "life" | "repair";
 
 export type Allocation = Record<SystemId, number>;
 
-export type FailureId = "generator" | "cooling" | "leak";
+export type FailureId = "generator" | "cooling" | "leak" | "solar" | "fire" | "scrubber" | "battery" | "meteor";
 
 export type RepairOptionId = "quick" | "full";
+
+export type DifficultyId = "cadet" | "engineer" | "commander";
+
+export type MissionKind = "training" | "random" | "daily";
+
+/** Parte do módulo afetada, usada pela ilustração. */
+export type ModulePart = "generator" | "radiator" | "hull" | "wiring" | "scrubber" | "battery";
 
 /** Modificadores que falhas e reparos aplicam ao módulo. Fatores multiplicam, taxas somam. */
 export interface Modifiers {
@@ -16,10 +23,16 @@ export interface Modifiers {
   generatorFactor: number;
   /** Eficiência da refrigeração (1 = nominal). */
   coolingFactor: number;
+  /** Eficiência do suporte de vida (1 = nominal). */
+  lifeFactor: number;
   /** Perda extra de oxigênio em %/s. */
   leakPerS: number;
   /** Calor extra em °C/s. */
   extraHeatPerS: number;
+  /** Fração utilizável da capacidade da bateria. */
+  batteryCapacityFactor: number;
+  /** Fração da descarga máxima da bateria. */
+  dischargeFactor: number;
 }
 
 export interface RepairOption {
@@ -44,29 +57,53 @@ export interface RepairOption {
 export interface FailureDef {
   id: FailureId;
   title: string;
-  /** Instante (s de jogo) do aviso prévio nos sensores. */
-  warnAt: number;
-  /** Instante (s de jogo) em que a falha acontece. */
-  at: number;
+  part: ModulePart;
   warnText: string;
+  /** Frase inicial do alarme; o efeito numérico é gerado a partir de `active` e da gravidade. */
   alertText: string;
-  /** Efeito enquanto a falha não for resolvida. */
+  /** Efeito enquanto a falha não for resolvida, com gravidade 1. */
   active: Partial<Modifiers>;
   options: Record<RepairOptionId, RepairOption>;
 }
 
-export interface Scenario {
-  id: string;
-  name: string;
-  moduleName: string;
-  failures: FailureDef[];
+export interface DifficultyDef {
+  id: DifficultyId;
+  label: string;
+  description: string;
+  failureCount: number;
+  /** Multiplica a intensidade das falhas. */
+  severity: number;
+  generatorKw: number;
+  /** Tempo tolerado em nível crítico (s). */
+  graceS: number;
+  /** Antecedência do aviso dos sensores (s). */
+  warningLeadS: number;
+  /** Multiplicador da pontuação. */
+  scoreMultiplier: number;
+  /** Pontos-base mínimos para ouro e prata (bronze = sobreviver). */
+  medals: { gold: number; silver: number };
+}
+
+export interface MissionSpec {
+  kind: MissionKind;
+  seed: string;
+  difficulty: DifficultyId;
+}
+
+/** Evento programado da missão: qual falha, quando e com que intensidade. */
+export interface ScheduledFailure {
+  id: FailureId;
+  at: number;
+  warnAt: number;
+  severity: number;
 }
 
 export type FailureStatus = "pending" | "warned" | "active" | "repairing" | "resolved";
 
-export interface FailureState {
-  id: FailureId;
+export interface FailureState extends ScheduledFailure {
   status: FailureStatus;
+  /** Agravamento acumulado enquanto a falha fica sem reparo (0 = intensidade original). */
+  escalation: number;
   startedAt?: number;
   resolution?: RepairOptionId;
   resolvedAt?: number;
@@ -112,7 +149,7 @@ export type Phase = "intro" | "active" | "ended";
 
 export interface SimState {
   version: number;
-  scenarioId: string;
+  mission: MissionSpec;
   phase: Phase;
   /** Tempo de jogo ativo decorrido (s). */
   t: number;
@@ -143,6 +180,8 @@ export interface Flows {
   generatorKw: number;
   /** Eficiência térmica do gerador (1 = sem perda). */
   generatorHeatEfficiency: number;
+  /** Capacidade utilizável da bateria agora (kJ). */
+  batteryCapacityKj: number;
   /** Consumo pedido por sistema (kW). Reparo só consome com equipe trabalhando. */
   demand: Allocation;
   demandKw: number;

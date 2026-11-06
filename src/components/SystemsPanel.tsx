@@ -1,5 +1,5 @@
 import { BALANCE } from "@/sim/config";
-import { batteryPct, criticalCountdown } from "@/sim/engine";
+import { batteryPct, criticalCountdown, graceS } from "@/sim/engine";
 import { batteryStatus, mainReasons, trendOf, type Trend } from "@/sim/insights";
 import type { Flows, SimState, Term } from "@/sim/types";
 import { num, signed } from "./format";
@@ -107,7 +107,7 @@ function CriticalTimer({ state, cause }: { state: SimState; cause: "heat" | "oxy
         </>
       ) : (
         <>
-          Margem se recuperando: <strong className="mono">{left} s</strong> de {BALANCE.critical.graceS} s
+          Margem se recuperando: <strong className="mono">{left} s</strong> de {graceS(state)} s
         </>
       )}
     </p>

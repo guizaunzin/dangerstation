@@ -1,5 +1,5 @@
 import { BALANCE } from "@/sim/config";
-import { repairOption } from "@/sim/engine";
+import { dec, difficultyOf, repairOption } from "@/sim/engine";
 import type { Flows, SimState, SystemId } from "@/sim/types";
 import { num, signed } from "./format";
 import { IconBattery, IconBolt, IconLungs, IconMinus, IconPlus, IconSnow, IconWrench } from "./Icons";
@@ -21,7 +21,7 @@ export function PowerPanel({ state, flows, disabled, onSet }: Props) {
   const step = BALANCE.allocation.stepKw;
   const max = BALANCE.allocation.maxPerSystemKw;
   const balance = flows.generatorKw - flows.demandKw;
-  const coach = state.phase === "active" && !state.tutorial.firstAdjustDone;
+  const coach = state.mission.kind === "training" && state.phase === "active" && !state.tutorial.firstAdjustDone;
   const job = state.repair ? repairOption(state.repair.failureId, state.repair.option) : null;
   const genFactor = flows.modifiers.generatorFactor;
 
@@ -36,7 +36,7 @@ export function PowerPanel({ state, flows, disabled, onSet }: Props) {
           <span className="label">Gerador</span>
           <strong className="mono">{num(flows.generatorKw, 1)} kW</strong>
           <span className="sub">
-            de {BALANCE.generator.nominalKw} kW
+            de {dec(difficultyOf(state).generatorKw, 1)} kW
             {genFactor < 0.999 ? ` · ${num(genFactor * 100, 0)}% por avaria` : ""}
             {flows.generatorHeatEfficiency < 0.999 ? ` · ${num(flows.generatorHeatEfficiency * 100, 0)}% pelo calor` : ""}
           </span>

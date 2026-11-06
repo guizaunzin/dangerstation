@@ -1,7 +1,7 @@
 /**
  * Salvamento local. A simulação é serializável em JSON; aqui só validamos e versionamos.
  */
-import { SAVE_KEY, SAVE_VERSION, SCENARIO } from "./config";
+import { DIFFICULTIES, FAILURES, SAVE_KEY, SAVE_VERSION } from "./config";
 import type { SimState } from "./types";
 
 export interface KeyValueStorage {
@@ -40,7 +40,10 @@ export function deserialize(raw: string | null): SimState | null {
   const s = env.state as SimState;
   const ok =
     s.version === SAVE_VERSION &&
-    s.scenarioId === SCENARIO.id &&
+    !!s.mission &&
+    ["training", "random", "daily"].includes(s.mission.kind) &&
+    typeof s.mission.seed === "string" &&
+    s.mission.difficulty in DIFFICULTIES &&
     ["intro", "active", "ended"].includes(s.phase) &&
     isNumber(s.t) &&
     isNumber(s.batteryKj) &&
@@ -51,7 +54,8 @@ export function deserialize(raw: string | null): SimState | null {
     isNumber(s.allocation.life) &&
     isNumber(s.allocation.repair) &&
     Array.isArray(s.failures) &&
-    s.failures.length === SCENARIO.failures.length &&
+    s.failures.length > 0 &&
+    s.failures.every((f) => f && f.id in FAILURES && isNumber(f.at) && isNumber(f.severity) && isNumber(f.escalation)) &&
     Array.isArray(s.log) &&
     !!s.critical &&
     isNumber(s.critical.heat) &&

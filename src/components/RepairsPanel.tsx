@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { failureDef, formatClock, previewRepair, repairOption } from "@/sim/engine";
+import { activeEffect, describeEffect, failureDef, formatClock, previewRepair, repairOption } from "@/sim/engine";
 import type { FailureId, Flows, RepairOptionId, SimState } from "@/sim/types";
 import { num, signed } from "./format";
-import { IconAlert, IconCheck, IconClock, IconCritical, IconInfo, IconWrench } from "./Icons";
+import { FailureIcon } from "./FailureIcon";
+import { IconCheck, IconClock, IconInfo, IconWrench } from "./Icons";
 
 interface Props {
   state: SimState;
@@ -16,7 +17,10 @@ interface Props {
 
 export function RepairsPanel({ state, flows, disabled, onChoose, onAbort }: Props) {
   const [confirmAbort, setConfirmAbort] = useState(false);
-  const visible = state.failures.filter((f) => f.status !== "pending");
+  const ORDER = { active: 0, repairing: 1, warned: 2, resolved: 3, pending: 4 } as const;
+  const visible = state.failures
+    .filter((f) => f.status !== "pending")
+    .sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.at - b.at);
   const job = state.repair;
 
   return (
@@ -88,7 +92,8 @@ export function RepairsPanel({ state, flows, disabled, onChoose, onAbort }: Prop
               return (
                 <li key={f.id} className="failure-card is-warned">
                   <p className="failure-title">
-                    <IconAlert /> <span className="tag tag-info">AVISO</span> {def.title} iminente
+                    <FailureIcon id={f.id} /> <span className="tag tag-info">AVISO</span> {def.title} em{" "}
+                    <span className="mono">{Math.max(0, Math.ceil(f.at - state.t))} s</span>
                   </p>
                   <p className="failure-text">{def.warnText}</p>
                 </li>
@@ -99,7 +104,7 @@ export function RepairsPanel({ state, flows, disabled, onChoose, onAbort }: Prop
               return (
                 <li key={f.id} className="failure-card is-resolved">
                   <p className="failure-title">
-                    <IconCheck /> <span className="tag tag-ok">RESOLVIDA</span> {def.title}
+                    <FailureIcon id={f.id} /> <span className="tag tag-ok">RESOLVIDA</span> {def.title} <IconCheck />
                   </p>
                   <p className="failure-text">
                     {opt.label} em {formatClock(f.resolvedAt ?? 0)}. <strong>Consequência:</strong> {opt.effectText}
@@ -111,11 +116,16 @@ export function RepairsPanel({ state, flows, disabled, onChoose, onAbort }: Prop
             return (
               <li key={f.id} className={`failure-card ${repairing ? "is-repairing" : "is-active"}`}>
                 <p className="failure-title">
-                  {repairing ? <IconWrench /> : <IconCritical />}{" "}
+                  <FailureIcon id={f.id} />{" "}
                   <span className={`tag ${repairing ? "tag-warn" : "tag-crit"}`}>{repairing ? "EM REPARO" : "FALHA ATIVA"}</span>{" "}
                   {def.title}
                 </p>
-                <p className="failure-text">{def.alertText}</p>
+                <p className="failure-text">
+                  {def.alertText} <strong>Agora:</strong> {describeEffect(activeEffect(f))}.
+                  {f.escalation > 0.005 && !repairing ? (
+                    <span className="escalation"> Piorando: +{Math.round(f.escalation * 100)}% sem reparo.</span>
+                  ) : null}
+                </p>
                 {!repairing ? (
                   <div className="option-grid">
                     {(["quick", "full"] as const).map((o) => {
