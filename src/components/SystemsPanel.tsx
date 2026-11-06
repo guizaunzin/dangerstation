@@ -28,11 +28,16 @@ export function LevelBadge({ level }: { level: Level }) {
   );
 }
 
-function TrendTag({ trend, text }: { trend: Trend; text: string }) {
+/**
+ * Seta e taxa de variação. A cor diz se a variação é boa ou ruim para o módulo
+ * (oxigênio e bateria subindo é bom; calor subindo é ruim), não apenas a direção.
+ */
+function TrendTag({ trend, text, goodWhen }: { trend: Trend; text: string; goodWhen: "up" | "down" }) {
   const Icon = trend === "up" ? IconUp : trend === "down" ? IconDown : IconFlat;
   const label = trend === "up" ? "subindo" : trend === "down" ? "caindo" : "estável";
+  const tone = trend === "stable" ? "stable" : trend === goodWhen ? "good" : "bad";
   return (
-    <span className={`trend trend-${trend}`}>
+    <span className={`trend trend-${tone}`}>
       <Icon /> <span className="sr-only">{label}</span>
       {text}
     </span>
@@ -153,7 +158,7 @@ export function SystemsPanel({ state, flows }: { state: SimState; flows: Flows }
               {num(bat, 0)}
               <small>%</small>
             </p>
-            <TrendTag trend={batInfo.trend} text={` ${signed(flows.batteryKw, 1)} kW`} />
+            <TrendTag trend={batInfo.trend} goodWhen="up" text={` ${signed(flows.batteryKw, 1)} kW`} />
           </div>
           <Bar
             value={bat}
@@ -184,7 +189,7 @@ export function SystemsPanel({ state, flows }: { state: SimState; flows: Flows }
               {num(state.heatC, 1)}
               <small>°C</small>
             </p>
-            <TrendTag trend={heatTrend} text={` ${signed(flows.heatRate, 2)} °C/s`} />
+            <TrendTag trend={heatTrend} goodWhen="down" text={` ${signed(flows.heatRate, 2)} °C/s`} />
           </div>
           <Bar
             value={state.heatC}
@@ -218,7 +223,7 @@ export function SystemsPanel({ state, flows }: { state: SimState; flows: Flows }
               {num(state.oxygenPct, 1)}
               <small>%</small>
             </p>
-            <TrendTag trend={oxyTrend} text={` ${signed(flows.oxygenRate, 2)} %/s`} />
+            <TrendTag trend={oxyTrend} goodWhen="up" text={` ${signed(flows.oxygenRate, 2)} %/s`} />
           </div>
           <Bar
             value={state.oxygenPct}
