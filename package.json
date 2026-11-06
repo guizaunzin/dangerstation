@@ -1,0 +1,35 @@
+{
+  "name": "dangerstation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Estação Espacial em Perigo — jogo solo de gestão de crises em um módulo orbital.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "balance": "tsx scripts/balance.ts",
+    "e2e": "node scripts/browser-check.mjs"
+  },
+  "engines": {
+    "node": ">=20.9"
+  },
+  "dependencies": {
+    "next": "^16.4.5",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/node": "^22",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "vitest": "^3.2.4",
+    "tsx": "^4"
+  }
+}
