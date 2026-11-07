@@ -14,7 +14,7 @@ import {
   remainingS,
   type SimConfig,
 } from "./engine";
-import type { Flows, SimState, Term } from "./types";
+import type { FailureId, Flows, SimState, Term } from "./types";
 
 export type AlertLevel = "critical" | "warning" | "info";
 
@@ -22,6 +22,14 @@ export interface Alert {
   id: string;
   level: AlertLevel;
   text: string;
+  /** Falha a que o alerta se refere, quando há uma. */
+  failureId?: FailureId;
+  /** Ação oferecida junto do alerta. */
+  action?: "decide" | "cancel-queue" | "abort";
+  /** Tipo visual: reparo em andamento e fila ganham barra/estilo próprios. */
+  kind?: "repair" | "queue";
+  /** Progresso do reparo (0–1). */
+  progress?: number;
 }
 
 export function activeAlerts(state: SimState, flows: Flows = computeFlows(state), cfg: SimConfig = DEFAULT_CONFIG): Alert[] {
@@ -74,15 +82,51 @@ export function activeAlerts(state: SimState, flows: Flows = computeFlows(state)
   }
   for (const f of state.failures) {
     const def = failureDef(f.id, cfg);
-    if (f.status === "active") {
-      const worse = f.escalation > 0.005 ? ` — piorando (+${Math.round(f.escalation * 100)}%)` : "";
-      out.push({ id: `failure-${f.id}`, level: "critical", text: `Falha ativa: ${def.title}${worse}` });
+    const worse = f.escalation > 0.005 ? ` (+${Math.round(f.escalation * 100)}%)` : "";
+    if (f.status === "active" && state.queue?.failureId === f.id) {
+      const opt = def.options[state.queue.option];
+      const left = state.repair ? repairRemainingS(state, flows, cfg) : 0;
+      out.push({
+        id: `queue-${f.id}`,
+        level: "warning",
+        kind: "queue",
+        failureId: f.id,
+        action: "cancel-queue",
+        text: `Na fila: ${opt.label}${Number.isFinite(left) ? ` · começa em ${Math.ceil(left)} s` : ""}${worse}`,
+      });
+    } else if (f.status === "active" && f.ack === "new") {
+      out.push({ id: `failure-${f.id}`, level: "critical", failureId: f.id, text: `Decisão pendente: ${def.title}${worse}` });
+    } else if (f.status === "active") {
+      out.push({ id: `failure-${f.id}`, level: "critical", failureId: f.id, action: "decide", text: `${def.title} sem reparo${worse}` });
     }
-    if (f.status === "repairing") out.push({ id: `failure-${f.id}`, level: "warning", text: `Em reparo: ${def.title}` });
-    if (f.status === "warned") out.push({ id: `warn-${f.id}`, level: "info", text: `Aviso dos sensores: ${def.title} iminente` });
+    if (f.status === "repairing" && state.repair?.failureId === f.id) {
+      const opt = def.options[state.repair.option];
+      const left = repairRemainingS(state, flows, cfg);
+      const slow = flows.repairSpeed < 0.999 ? ` · ritmo ${Math.round(flows.repairSpeed * 100)}%` : "";
+      out.push({
+        id: `repair-${f.id}`,
+        level: "info",
+        kind: "repair",
+        failureId: f.id,
+        action: "abort",
+        progress: Math.min(1, state.repair.progressS / opt.durationS),
+        text: `Reparo: ${opt.label} · ${Number.isFinite(left) ? `faltam ${Math.ceil(left)} s` : "parado sem potência"}${slow}`,
+      });
+    }
+    if (f.status === "warned") {
+      out.push({ id: `warn-${f.id}`, level: "info", failureId: f.id, text: `Sensores: ${def.title} em ${Math.max(0, Math.ceil(f.at - state.t))} s` });
+    }
   }
-  const order: Record<AlertLevel, number> = { critical: 0, warning: 1, info: 2 };
-  return out.sort((a, b2) => order[a.level] - order[b2.level]);
+  // Ordem: críticos, depois o reparo em andamento e a fila, depois alertas e avisos.
+  const rank = (a: Alert) => (a.level === "critical" ? 0 : a.kind ? 1 : a.level === "warning" ? 2 : 3);
+  return out.sort((a, b2) => rank(a) - rank(b2));
+}
+
+/** Tempo até a equipe liberar, no ritmo atual (s). */
+export function repairRemainingS(state: SimState, flows: Flows = computeFlows(state), cfg: SimConfig = DEFAULT_CONFIG): number {
+  if (!state.repair) return 0;
+  const opt = failureDef(state.repair.failureId, cfg).options[state.repair.option];
+  return flows.repairSpeed > 0.001 ? (opt.durationS - state.repair.progressS) / flows.repairSpeed : Infinity;
 }
 
 export type Trend = "up" | "down" | "stable";

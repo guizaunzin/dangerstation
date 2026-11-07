@@ -67,7 +67,8 @@ Os sensores avisam antes de cada falha, e a linha do tempo no topo mostra a nave
 | Curto na bateria | descarga a 35%, capacidade a 75% | 1 kW · 12 s; capacidade a 60% | 4 kW · 55 s |
 | Micrometeorito | −0,08 %/s e refrigeração a 75% | 1 kW · 12 s; −0,02 %/s e refrigeração a 90% | 3 kW · 45 s |
 
-- Uma equipe, um reparo por vez. Antes de confirmar, a tela mostra custo, duração, efeito esperado e a projeção de energia, calor e oxigênio. A escolha vale até o resgate.
+- **Decisão de reparo**: quando uma falha chega, a decisão abre sozinha com as duas respostas (custo, duração, efeito e projeção de energia) e o botão **Ignorar por enquanto**. No Treinamento e no Cadete o relógio para até você decidir; no Engenheiro e no Comandante ele continua correndo, e a decisão fica presa embaixo da tela (celular) ou no topo da coluna de alarmes (desktop), sem cobrir os botões de potência. Os botões da decisão só respondem 0,4 s depois de aparecer, para um toque no + não escolher um reparo por engano.
+- **Equipe e fila**: uma equipe, um reparo por vez e uma vaga na fila. Com a equipe ocupada, a decisão oferece **Na fila** (começa sozinho quando a equipe liberar) ou **Trocar agora** (interrompe o reparo atual e perde o progresso). Uma falha ignorada vira alarme crítico com o botão **Decidir** para reabrir. A escolha vale até o resgate.
 - **Falhas esperando reparo pioram**: +20% de intensidade por minuto, até +60%. A equipe trabalhando segura o agravamento.
 - **Derrota**: calor acima de 85 °C ou oxigênio abaixo de 20% pelo tempo de tolerância da dificuldade. Um contador mostra quanto falta; fora do nível crítico a margem se recupera 1 s por segundo.
 - **Vitória**: chegar a 00:00 com o módulo habitável.
@@ -82,6 +83,12 @@ O relatório final mostra a causa da derrota ou o estado do módulo no resgate, 
 - −3 por segundo em nível crítico.
 
 O total é multiplicado pelo fator da dificuldade. Sobreviver dá **bronze**; prata e ouro exigem pontos-base mínimos por dificuldade (Cadete 840/900, Engenheiro 690/750, Comandante 620/680). O melhor resultado de cada modo fica salvo e aparece no menu.
+
+### Painel
+
+- **Desktop largo (≥ 1200 px)**: três colunas fixas. À esquerda ficam a decisão, os alarmes e reparos (altura reservada) e a ilustração do módulo; no centro, os cartões de Calor/Refrigeração, Oxigênio/Suporte de vida e Energia/Bateria, cada um com o nível, a taxa, o motivo e o controle de potência; à direita, a equipe de reparo e o registro.
+- **Telas médias e celular**: os mesmos cartões empilhados (lado a lado a partir de 900 px) e uma faixa de alarmes de uma linha no topo. O contador "+N" abre a lista completa por cima da tela.
+- Alarmes novos nunca deslocam os botões: o teste no navegador confere a posição do + da refrigeração antes e depois de avisos, falhas e reparos.
 
 ### Outros controles
 
@@ -116,6 +123,9 @@ src/components/     interface (React, client components)
   MissionSelect.tsx menu de modos e dificuldades
   RescueTimeline.tsx linha do tempo do resgate
   ModuleArt.tsx     ilustração em SVG do módulo, reagindo ao estado
+  SystemCards.tsx   cartões unificados: recurso + taxa + motivo + controle de potência
+  DecisionPanel.tsx decisão de reparo (pop-up que pausa ou folha ancorada)
+  AlertsPanel.tsx   coluna de alarmes (desktop) e faixa de uma linha (celular)
 src/app/            Next.js App Router (página única, CSS em globals.css)
 tests/              Vitest
 scripts/            balance.ts e browser-check.mjs
@@ -129,7 +139,7 @@ scripts/            balance.ts e browser-check.mjs
 
 1. Edite `src/sim/config.ts`:
    - `BALANCE`: gerador, bateria, calor, oxigênio, agravamento, sorteio e duração.
-   - `DIFFICULTIES`: falhas por missão, intensidade, gerador, avisos, tolerância, multiplicador e medalhas.
+   - `DIFFICULTIES`: falhas por missão, intensidade, gerador, avisos, tolerância, se o relógio para nas decisões, multiplicador e medalhas.
    - `FAILURES`: efeito ativo e as duas respostas de cada falha.
    - `TRAINING`: a sequência fixa do treinamento.
 2. Rode `npm run balance` para ver taxas de vitória e medalhas por dificuldade.

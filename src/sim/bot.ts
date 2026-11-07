@@ -10,10 +10,13 @@ import {
   computeFlows,
   createInitialState,
   DEFAULT_CONFIG,
+  ignoreFailure,
+  queueRepair,
   remainingS,
   repairOption,
   setAllocation,
   startRepair,
+  step,
   type SimConfig,
 } from "./engine";
 import type { FailureId, MissionSpec, RepairOptionId, ScheduledFailure, SimState } from "./types";
@@ -47,14 +50,20 @@ export function botDecide(state: SimState, opts: BotOptions = DEFAULT_BOT, cfg: 
   let s = state;
   if (s.phase !== "active") return s;
 
-  if (!s.repair) {
-    const active = s.failures.filter((f) => f.status === "active");
-    if (active.length) {
-      active.sort((a, b) => URGENCY.indexOf(a.id) - URGENCY.indexOf(b.id));
-      const target = active[0];
-      s = startRepair(s, target.id, chooseOption(s, target.id, opts.policy, cfg), cfg);
-    }
+  // Reparos: começa o mais urgente; com a equipe ocupada, põe o próximo na fila; o resto fica para depois.
+  const waiting = () =>
+    s.failures
+      .filter((f) => f.status === "active" && s.queue?.failureId !== f.id)
+      .sort((a, b) => URGENCY.indexOf(a.id) - URGENCY.indexOf(b.id));
+  if (!s.repair && waiting().length) {
+    const target = waiting()[0];
+    s = startRepair(s, target.id, chooseOption(s, target.id, opts.policy, cfg), cfg);
   }
+  if (s.repair && !s.queue && waiting().length) {
+    const target = waiting()[0];
+    s = queueRepair(s, target.id, chooseOption(s, target.id, opts.policy, cfg), cfg);
+  }
+  for (const f of s.failures) if (f.status === "active" && f.ack === "new") s = ignoreFailure(s, f.id, cfg);
 
   const f = computeFlows(s, cfg);
   const max = cfg.balance.allocation.maxPerSystemKw;
@@ -100,7 +109,12 @@ export function runBot(
   return s;
 }
 
-/** Joga sem tocar em nada. */
+/** Joga sem fazer nada: cada decisão de reparo que aparece é adiada ("Ignorar por enquanto"). */
 export function runIdle(mission: MissionSpec, cfg: SimConfig = DEFAULT_CONFIG): SimState {
-  return advance(beginMission(createInitialState(mission, cfg), cfg), BALANCE.missionDurationS + 10, cfg);
+  let s = beginMission(createInitialState(mission, cfg), cfg);
+  for (let i = 0; i < BALANCE.missionDurationS * 2 && s.phase === "active"; i++) {
+    for (const f of s.failures) if (f.status === "active" && f.ack === "new") s = ignoreFailure(s, f.id, cfg);
+    s = step(s, cfg);
+  }
+  return s;
 }

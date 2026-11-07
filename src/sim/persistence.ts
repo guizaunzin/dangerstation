@@ -55,7 +55,8 @@ export function deserialize(raw: string | null): SimState | null {
     isNumber(s.allocation.repair) &&
     Array.isArray(s.failures) &&
     s.failures.length > 0 &&
-    s.failures.every((f) => f && f.id in FAILURES && isNumber(f.at) && isNumber(f.severity) && isNumber(f.escalation)) &&
+    s.failures.every((f) => f && f.id in FAILURES && isNumber(f.at) && isNumber(f.severity) && isNumber(f.escalation) && ["none", "new", "ignored", "handled"].includes(f.ack)) &&
+    (s.queue === null || (typeof s.queue === "object" && s.queue.failureId in FAILURES)) &&
     Array.isArray(s.log) &&
     !!s.critical &&
     isNumber(s.critical.heat) &&

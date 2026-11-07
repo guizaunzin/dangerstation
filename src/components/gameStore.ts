@@ -4,7 +4,20 @@
  */
 import { PREFS_KEY } from "@/sim/config";
 import { clampSpeed, createClock, pause, resume, speedFromSearch, tickClock, type ClockState } from "@/sim/clock";
-import { abortRepair, beginMission, computeFlows, createInitialState, setAllocation, startRepair, step } from "@/sim/engine";
+import {
+  abortRepair,
+  beginMission,
+  cancelQueue,
+  computeFlows,
+  createInitialState,
+  ignoreFailure,
+  queueRepair,
+  reopenDecision,
+  setAllocation,
+  startRepair,
+  step,
+  switchRepair,
+} from "@/sim/engine";
 import { cuesBetween } from "@/sim/events";
 import { clearSave, loadGame, memoryStorage, saveGame, type KeyValueStorage } from "@/sim/persistence";
 import { applyResult, loadRecords, saveRecords, type RecordResult, type Records } from "@/sim/scoring";
@@ -259,9 +272,33 @@ export class GameStore {
     this.emit();
   }
 
-  startRepair(failure: FailureId, option: RepairOptionId) {
+  /** Resposta à decisão de reparo: começar agora, pôr na fila ou trocar o reparo atual. */
+  decide(failure: FailureId, option: RepairOptionId, mode: "start" | "queue" | "switch") {
     if (!this.sim) return;
-    this.sim = startRepair(this.sim, failure, option);
+    this.sim =
+      mode === "queue"
+        ? queueRepair(this.sim, failure, option)
+        : mode === "switch"
+          ? switchRepair(this.sim, failure, option)
+          : startRepair(this.sim, failure, option);
+    this.emit();
+  }
+
+  ignore(failure: FailureId) {
+    if (!this.sim) return;
+    this.sim = ignoreFailure(this.sim, failure);
+    this.emit();
+  }
+
+  reopen(failure: FailureId) {
+    if (!this.sim) return;
+    this.sim = reopenDecision(this.sim, failure);
+    this.emit();
+  }
+
+  cancelQueue() {
+    if (!this.sim) return;
+    this.sim = cancelQueue(this.sim);
     this.emit();
   }
 

@@ -98,6 +98,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
     graceS: 60,
     warningLeadS: 25,
     scoreMultiplier: 0.8,
+    decisionPauses: true,
     medals: { gold: 900, silver: 840 },
   },
   engineer: {
@@ -110,6 +111,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
     graceS: 45,
     warningLeadS: 20,
     scoreMultiplier: 1,
+    decisionPauses: false,
     medals: { gold: 750, silver: 690 },
   },
   commander: {
@@ -122,6 +124,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
     graceS: 30,
     warningLeadS: 15,
     scoreMultiplier: 1.35,
+    decisionPauses: false,
     medals: { gold: 680, silver: 620 },
   },
 };
@@ -392,8 +395,8 @@ export function trainingSchedule(): ScheduledFailure[] {
   return TRAINING.schedule.map((s) => ({ id: s.id, at: s.at, warnAt: s.at - lead, severity }));
 }
 
-export const SAVE_VERSION = 2;
-export const SAVE_KEY = "dangerstation:save:v2";
+export const SAVE_VERSION = 3;
+export const SAVE_KEY = "dangerstation:save:v3";
 export const RECORDS_KEY = "dangerstation:records:v1";
 export const PREFS_KEY = "dangerstation:prefs:v1";
 export const MODULE_NAME = "Módulo Kestrel";
