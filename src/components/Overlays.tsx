@@ -110,8 +110,13 @@ const TRAINING_STEPS = [
           <IconAlert /> Os sensores avisam antes de cada falha. A linha do tempo no topo mostra a nave chegando e as falhas previstas.
         </li>
         <li>
-          <IconWrench /> Cada falha tem uma <strong>resposta rápida</strong> (barata, com sequela) e um <strong>reparo completo</strong>{" "}
-          (caro e demorado, sem sequela). Uma equipe, um reparo por vez.
+          <IconWrench /> Quando uma falha chega, a decisão aparece na hora: <strong>resposta rápida</strong> (barata, com sequela),{" "}
+          <strong>reparo completo</strong> (caro e demorado, sem sequela) ou <strong>ignorar por enquanto</strong>. No treinamento o
+          relógio espera você decidir.
+        </li>
+        <li>
+          <IconWrench /> Uma equipe, um reparo por vez e uma vaga na <strong>fila</strong>: com a equipe ocupada, o próximo reparo
+          começa sozinho quando ela liberar.
         </li>
         <li>
           <IconCritical /> Falhas esperando reparo <strong>pioram</strong> com o tempo. Escolha a ordem com cuidado.
@@ -154,7 +159,19 @@ export function IntroOverlay({ state, onStart, onMenu }: { state: SimState; onSt
               <strong>{d.graceS} s</strong>.
             </li>
             <li>
-              <IconWrench /> Falhas esperando reparo pioram até +{Math.round(BALANCE.escalation.max * 100)}%.
+              <IconWrench /> Falhas esperando reparo pioram até +{Math.round(BALANCE.escalation.max * 100)}%. Uma equipe e uma vaga na fila.
+            </li>
+            <li>
+              <IconPlay />{" "}
+              {d.decisionPauses ? (
+                <>
+                  Nas decisões de reparo <strong>o relógio para</strong> até você escolher.
+                </>
+              ) : (
+                <>
+                  Nas decisões de reparo <strong>o relógio continua correndo</strong>.
+                </>
+              )}
             </li>
             <li>
               <IconCheck /> Pontuação ×{String(d.scoreMultiplier).replace(".", ",")}. Medalha de ouro a partir de {d.medals.gold} pontos-base.

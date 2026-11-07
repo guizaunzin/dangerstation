@@ -80,6 +80,8 @@ export interface DifficultyDef {
   warningLeadS: number;
   /** Multiplicador da pontuação. */
   scoreMultiplier: number;
+  /** Se o relógio para enquanto uma falha nova espera a decisão do jogador. */
+  decisionPauses: boolean;
   /** Pontos-base mínimos para ouro e prata (bronze = sobreviver). */
   medals: { gold: number; silver: number };
 }
@@ -100,10 +102,23 @@ export interface ScheduledFailure {
 
 export type FailureStatus = "pending" | "warned" | "active" | "repairing" | "resolved";
 
+export type FailureAck = "none" | "new" | "ignored" | "handled";
+
+/** Reparo escolhido que espera a equipe liberar (uma vaga). */
+export interface QueuedRepair {
+  failureId: FailureId;
+  option: RepairOptionId;
+}
+
 export interface FailureState extends ScheduledFailure {
   status: FailureStatus;
   /** Agravamento acumulado enquanto a falha fica sem reparo (0 = intensidade original). */
   escalation: number;
+  /**
+   * Decisão do jogador sobre a falha ativa: "new" espera resposta (abre a decisão),
+   * "ignored" ficou para depois, "handled" já tem reparo em andamento ou na fila.
+   */
+  ack: FailureAck;
   startedAt?: number;
   resolution?: RepairOptionId;
   resolvedAt?: number;
@@ -160,6 +175,7 @@ export interface SimState {
   oxygenPct: number;
   failures: FailureState[];
   repair: RepairJob | null;
+  queue: QueuedRepair | null;
   /** Tempo acumulado em nível crítico (s). Derrota quando atinge a tolerância. */
   critical: Record<CriticalCause, number>;
   log: LogEntry[];

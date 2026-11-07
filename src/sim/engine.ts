@@ -96,8 +96,11 @@ export function createInitialState(
     batteryKj,
     heatC: b.heat.initialC,
     oxygenPct: b.oxygen.initialPct,
-    failures: [...schedule].sort((a, b2) => a.at - b2.at).map((f) => ({ ...f, status: "pending" as const, escalation: 0 })),
+    failures: [...schedule]
+      .sort((a, b2) => a.at - b2.at)
+      .map((f) => ({ ...f, status: "pending" as const, escalation: 0, ack: "none" as const })),
     repair: null,
+    queue: null,
     critical: { heat: 0, oxygen: 0 },
     log: [],
     nextLogId: 1,
@@ -360,6 +363,7 @@ export function isOxygenCritical(oxygenPct: number, cfg: SimConfig = DEFAULT_CON
 /** Avança um passo fixo. Fora da fase ativa devolve o próprio estado. */
 export function step(prev: SimState, cfg: SimConfig = DEFAULT_CONFIG): SimState {
   if (prev.phase !== "active" || prev.outcome) return prev;
+  if (isWaitingDecision(prev, cfg)) return prev;
   const b = cfg.balance;
   const dt = b.tickS;
   const grace = graceS(prev, cfg);
@@ -395,6 +399,7 @@ export function step(prev: SimState, cfg: SimConfig = DEFAULT_CONFIG): SimState 
         s.allocation.repair = 0;
         pushLog(s, "info", "Potência de reparos liberada (0 kW).", undefined, cfg);
       }
+      startQueued(s, cfg);
     }
   }
 
@@ -408,6 +413,7 @@ export function step(prev: SimState, cfg: SimConfig = DEFAULT_CONFIG): SimState 
     if ((f.status === "pending" || f.status === "warned") && s.t >= f.at) {
       f.status = "active";
       f.startedAt = s.t;
+      f.ack = "new";
       pushLog(s, "alert", `Falha: ${def.title}. ${def.alertText} Efeito: ${describeEffect(activeEffect(f, cfg))}.`, undefined, cfg);
     }
   }
@@ -528,27 +534,120 @@ export function repairBlockReason(state: SimState, failureId: FailureId): Repair
   return null;
 }
 
-export function startRepair(state: SimState, failureId: FailureId, option: RepairOptionId, cfg: SimConfig = DEFAULT_CONFIG): SimState {
-  if (repairBlockReason(state, failureId) !== null) return state;
+/** Falhas ativas esperando a primeira resposta do jogador, da mais antiga para a mais nova. */
+export function awaitingDecision(state: SimState): FailureState[] {
+  return state.failures
+    .filter((f) => f.status === "active" && f.ack === "new")
+    .sort((a, b) => (a.startedAt ?? a.at) - (b.startedAt ?? b.at));
+}
+
+/** Nas dificuldades que pausam, o relógio espera enquanto houver uma decisão aberta. */
+export function isWaitingDecision(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): boolean {
+  return state.phase === "active" && difficultyOf(state, cfg).decisionPauses && awaitingDecision(state).length > 0;
+}
+
+/** Começa um reparo (mutável, uso interno). */
+function beginRepair(s: SimState, failureId: FailureId, option: RepairOptionId, cfg: SimConfig, prefix = "Decisão") {
   const opt = repairOption(failureId, option, cfg);
-  const s = clone(state);
   const f = s.failures.find((x) => x.id === failureId)!;
   f.status = "repairing";
+  f.ack = "handled";
+  if (s.queue?.failureId === failureId) s.queue = null;
   s.repair = { failureId, option, progressS: 0, startedAt: s.t };
   if (s.allocation.repair < opt.powerKw) s.allocation.repair = opt.powerKw;
-  pushLog(s, "decision", `Decisão: ${opt.label} (${opt.powerKw} kW, ${opt.durationS} s).`, undefined, cfg);
+  pushLog(s, "decision", `${prefix}: ${opt.label} (${opt.powerKw} kW, ${opt.durationS} s).`, undefined, cfg);
+}
+
+/** Quando a equipe libera, começa o reparo da fila (mutável, uso interno). */
+function startQueued(s: SimState, cfg: SimConfig) {
+  const q = s.queue;
+  if (!q || s.repair) return;
+  s.queue = null;
+  const f = s.failures.find((x) => x.id === q.failureId);
+  if (f?.status === "active") beginRepair(s, q.failureId, q.option, cfg, "Fila");
+}
+
+export function startRepair(state: SimState, failureId: FailureId, option: RepairOptionId, cfg: SimConfig = DEFAULT_CONFIG): SimState {
+  if (repairBlockReason(state, failureId) !== null) return state;
+  const s = clone(state);
+  beginRepair(s, failureId, option, cfg);
   return s;
+}
+
+/** Põe um reparo na fila enquanto a equipe termina o atual. Substitui o que estava na fila. */
+export function queueRepair(state: SimState, failureId: FailureId, option: RepairOptionId, cfg: SimConfig = DEFAULT_CONFIG): SimState {
+  if (state.phase !== "active" || !state.repair) return state;
+  const f = state.failures.find((x) => x.id === failureId);
+  if (!f || f.status !== "active") return state;
+  const s = clone(state);
+  const prevQueued = s.queue;
+  if (prevQueued && prevQueued.failureId !== failureId) {
+    const pf = s.failures.find((x) => x.id === prevQueued.failureId);
+    if (pf && pf.status === "active") pf.ack = "ignored";
+    pushLog(s, "warn", `${failureDef(prevQueued.failureId, cfg).title} saiu da fila.`, undefined, cfg);
+  }
+  s.queue = { failureId, option };
+  s.failures.find((x) => x.id === failureId)!.ack = "handled";
+  const opt = repairOption(failureId, option, cfg);
+  pushLog(s, "decision", `Na fila: ${opt.label} (${opt.powerKw} kW, ${opt.durationS} s), depois do reparo atual.`, undefined, cfg);
+  return s;
+}
+
+export function cancelQueue(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): SimState {
+  if (!state.queue || state.phase !== "active") return state;
+  const s = clone(state);
+  const f = s.failures.find((x) => x.id === s.queue!.failureId);
+  if (f && f.status === "active") f.ack = "ignored";
+  pushLog(s, "warn", `Fila cancelada: ${failureDef(s.queue!.failureId, cfg).title} segue sem reparo.`, undefined, cfg);
+  s.queue = null;
+  return s;
+}
+
+/** Deixa a falha para depois: ela segue piorando e pode ser reaberta. */
+export function ignoreFailure(state: SimState, failureId: FailureId, cfg: SimConfig = DEFAULT_CONFIG): SimState {
+  const f = state.failures.find((x) => x.id === failureId);
+  if (state.phase !== "active" || !f || f.status !== "active" || f.ack !== "new") return state;
+  const s = clone(state);
+  s.failures.find((x) => x.id === failureId)!.ack = "ignored";
+  pushLog(s, "warn", `Decisão adiada: ${failureDef(failureId, cfg).title} segue sem reparo e piorando.`, undefined, cfg);
+  return s;
+}
+
+/** Reabre a decisão de uma falha adiada. */
+export function reopenDecision(state: SimState, failureId: FailureId): SimState {
+  const f = state.failures.find((x) => x.id === failureId);
+  if (state.phase !== "active" || !f || f.status !== "active" || f.ack === "new" || state.queue?.failureId === failureId) return state;
+  const s = clone(state);
+  s.failures.find((x) => x.id === failureId)!.ack = "new";
+  return s;
+}
+
+/** Interrompe o reparo atual (o progresso se perde) e começa outro no lugar. */
+export function switchRepair(state: SimState, failureId: FailureId, option: RepairOptionId, cfg: SimConfig = DEFAULT_CONFIG): SimState {
+  if (!state.repair || state.phase !== "active") return state;
+  const f = state.failures.find((x) => x.id === failureId);
+  if (!f || f.status !== "active") return state;
+  const s = clone(state);
+  interrupt(s, cfg);
+  beginRepair(s, failureId, option, cfg);
+  return s;
+}
+
+function interrupt(s: SimState, cfg: SimConfig) {
+  const opt = repairOption(s.repair!.failureId, s.repair!.option, cfg);
+  const f = s.failures.find((x) => x.id === s.repair!.failureId)!;
+  f.status = "active";
+  f.ack = "ignored";
+  s.repair = null;
+  s.allocation.repair = 0;
+  pushLog(s, "warn", `Reparo interrompido: ${opt.label}. O progresso foi perdido.`, undefined, cfg);
 }
 
 export function abortRepair(state: SimState, cfg: SimConfig = DEFAULT_CONFIG): SimState {
   if (!state.repair || state.phase !== "active") return state;
   const s = clone(state);
-  const opt = repairOption(s.repair!.failureId, s.repair!.option, cfg);
-  const f = s.failures.find((x) => x.id === s.repair!.failureId)!;
-  f.status = "active";
-  s.repair = null;
-  s.allocation.repair = 0;
-  pushLog(s, "warn", `Reparo interrompido: ${opt.label}. O progresso foi perdido.`, undefined, cfg);
+  interrupt(s, cfg);
+  startQueued(s, cfg);
   return s;
 }
 
