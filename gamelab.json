@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "projectId": "estacao",
+  "repository": "guizaunzin/dangerstation",
+  "updatedAt": "2026-11-08T19:30:00Z",
+  "summary": "Jogo solo de gestão de crises num único módulo orbital: 10 minutos de jogo ativo até o resgate, decidindo o tempo todo qual sistema (refrigeração, suporte de vida ou reparos) recebe energia. Calor, oxigênio e bateria disputam um gerador limitado; falhas sorteadas por semente pedem uma resposta rápida ou um reparo completo, com uma equipe e uma vaga na fila. Três modos (Treinamento, Missão sorteada, Desafio do dia), três dificuldades, pontuação com medalhas e recordes locais. Next.js, sem backend.",
+  "nextTask": "Jogar missões completas em cada dificuldade (com ?velocidade=N para acelerar) e comparar a taxa de vitória de uma pessoa com a do robô jogador (Cadete 100%, Engenheiro ~97%, Comandante ~57%), ajustando src/sim/config.ts se o Comandante estiver difícil demais.",
+  "features": [
+    {
+      "id": "resource-sim",
+      "text": "Simulação determinística de energia, calor e oxigênio em passos fixos de 1 s, com bateria cobrindo déficit e perda de rendimento do gerador acima de 55 °C.",
+      "status": "validated",
+      "evidence": "tests/engine.test.ts passou em 08/11/2026 (npm test: 86/86)."
+    },
+    {
+      "id": "failures",
+      "text": "Catálogo de 8 falhas, cada uma com resposta rápida e reparo completo; falhas sem reparo pioram até +60%.",
+      "status": "validated",
+      "evidence": "tests/engine.test.ts passou em 08/11/2026 (npm test: 86/86)."
+    },
+    {
+      "id": "modes-difficulty",
+      "text": "Treinamento fixo, Missão sorteada por semente, Desafio do dia e três dificuldades (Cadete, Engenheiro, Comandante).",
+      "status": "validated",
+      "evidence": "tests/balance.test.ts confere que a inação perde em todas as sementes e as taxas de vitória do robô por dificuldade; passou em 08/11/2026."
+    },
+    {
+      "id": "repair-decision",
+      "text": "Decisão de reparo que abre sozinha quando a falha chega (pausa no Treinamento e no Cadete), fila com uma vaga, Trocar agora e Ignorar por enquanto.",
+      "status": "validated",
+      "evidence": "tests/decision-queue.test.ts passou em 08/11/2026 (npm test: 86/86)."
+    },
+    {
+      "id": "scoring",
+      "text": "Pontuação por sobrevivência, margens e falhas resolvidas, multiplicador por dificuldade, medalhas e recorde por modo.",
+      "status": "validated",
+      "evidence": "tests/random-scoring.test.ts passou em 08/11/2026 (npm test: 86/86)."
+    },
+    {
+      "id": "save-resume",
+      "text": "Salvamento local versionado (v3); recarregar a página retoma a missão em pausa, com reparos e fila preservados.",
+      "status": "validated",
+      "evidence": "tests/clock-persistence.test.ts passou em 08/11/2026 (npm test: 86/86)."
+    },
+    {
+      "id": "three-column-layout",
+      "text": "Painel em três colunas no desktop largo e cartões empilhados no celular; alarmes novos nunca deslocam os botões de potência.",
+      "status": "implemented",
+      "evidence": "Coberto por scripts/browser-check.mjs (Playwright), que não foi executado nesta verificação."
+    },
+    {
+      "id": "sound",
+      "text": "Alarmes sonoros sintetizados no navegador, com botão de mudo.",
+      "status": "implemented",
+      "evidence": ""
+    }
+  ],
+  "decisions": [
+    {
+      "id": "ten-minute-mission",
+      "date": "2026-11-06T17:10:51Z",
+      "text": "A missão passou a ter 10 minutos de jogo ativo, com 5 a 8 falhas de um catálogo de 8 tipos (a V1 tinha três falhas fixas)."
+    },
+    {
+      "id": "seeded-missions",
+      "date": "2026-11-06T17:10:51Z",
+      "text": "A sequência de falhas é sorteada a partir de uma semente e gravada no estado, para que a missão seja reproduzível, compartilhável e retomável."
+    },
+    {
+      "id": "clock-by-difficulty",
+      "date": "2026-11-07T11:46:13Z",
+      "text": "No Treinamento e no Cadete o relógio para durante a decisão de reparo; no Engenheiro e no Comandante ele continua correndo e a decisão fica ancorada sem cobrir os botões."
+    },
+    {
+      "id": "vercel-framework",
+      "date": "2026-11-06T09:55:53Z",
+      "text": "O vercel.json fixa o framework Next.js, porque o projeto foi importado na Vercel com o repositório vazio e o preset salvo servia 404."
+    }
+  ],
+  "bugs": [
+    {
+      "id": "vercel-404",
+      "date": "2026-11-06T09:55:53Z",
+      "text": "Corrigido: o deploy servia 404 NOT_FOUND porque a Vercel tinha gravado o preset Other."
+    },
+    {
+      "id": "human-balance",
+      "date": "2026-11-07T11:46:13Z",
+      "text": "Ponto de atenção: o balanceamento foi medido com um robô jogador; uma pessoa tende a ficar abaixo das taxas dele."
+    }
+  ],
+  "tests": [
+    {
+      "id": "unit-2026-11-08",
+      "date": "2026-11-08T19:00:00Z",
+      "text": "npm test (Vitest): 6 arquivos, 86 testes passando — motor, relógio e salvamento, fila de decisões, alertas, sorteio e pontuação, e balanceamento por dificuldade."
+    }
+  ],
+  "changelog": [
+    {
+      "id": "pr-5",
+      "date": "2026-11-07T11:46:13Z",
+      "text": "PR #5: decisão de reparo automática, fila de reparos, painel em três colunas no desktop e cartões unificados por sistema; salvamento v3."
+    },
+    {
+      "id": "pr-4",
+      "date": "2026-11-06T20:07:25Z",
+      "text": "PR #4: cor das tendências conforme o efeito no módulo, multiplicador da dificuldade explicado no relatório e pausa ao abrir detalhes de reparo."
+    },
+    {
+      "id": "pr-3",
+      "date": "2026-11-06T17:10:51Z",
+      "text": "PR #3 (V2): missão de 10 minutos, falhas sorteadas, dificuldades, pontuação, medalhas, linha do tempo do resgate, ilustração do módulo e alarmes sonoros."
+    },
+    {
+      "id": "pr-2",
+      "date": "2026-11-06T09:55:53Z",
+      "text": "PR #2: framework Next.js fixado no vercel.json."
+    },
+    {
+      "id": "pr-1",
+      "date": "2026-11-06T09:28:56Z",
+      "text": "PR #1: V1 jogável — simulação de energia, calor e oxigênio, três falhas, salvamento local e relatório final."
+    }
+  ]
+}
